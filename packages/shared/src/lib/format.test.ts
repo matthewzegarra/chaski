@@ -39,6 +39,9 @@ describe('dates', () => {
     expect(formatRelative('2026-10-01T11:55:00Z', now)).toBe('hace 5 min')
     expect(formatRelative('2026-10-01T09:00:00Z', now)).toBe('hace 3 h')
   })
+  it('never shifts calendar dates (birth dates, due dates)', () => {
+    expect(formatDate('1994-03-21')).toMatch(/^21 mar 1994$/)
+  })
   it('returns a dash for empty values', () => {
     expect(formatDate(null)).toBe('—')
   })

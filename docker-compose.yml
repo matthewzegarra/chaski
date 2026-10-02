@@ -159,6 +159,15 @@ services:
     ports:
       - "3000:8080"
 
+  consola:
+    build:
+      context: .
+      dockerfile: apps/consola/Dockerfile
+    image: chaski/consola:local
+    environment: *web-env
+    ports:
+      - "3001:8080"
+
 volumes:
   pgdata:
   uploads:

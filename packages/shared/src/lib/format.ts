@@ -48,8 +48,19 @@ const dateTimeFmt = new Intl.DateTimeFormat('es-PE', {
   hour12: false,
 })
 
+const calendarFmt = new Intl.DateTimeFormat('es-PE', {
+  timeZone: 'UTC',
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric',
+})
+
 export function formatDate(iso: string | Date | null | undefined): string {
   if (!iso) return '—'
+  // "1994-03-21" is a calendar date (birth date, due date): never shift it by time zone.
+  if (typeof iso === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    return calendarFmt.format(new Date(`${iso}T00:00:00Z`)).replace('.', '')
+  }
   return dateFmt.format(new Date(iso)).replace('.', '')
 }
 

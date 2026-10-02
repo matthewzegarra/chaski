@@ -39,18 +39,26 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     { className, variant, size, asChild = false, loading = false, children, disabled, ...props },
     ref,
   ) => {
-    const Comp = asChild ? Slot : 'button'
+    const classes = cn(buttonVariants({ variant, size }), className)
+    if (asChild) {
+      // Slot needs exactly one child element (e.g. a <Link>), so no spinner here.
+      return (
+        <Slot ref={ref} className={classes} {...props}>
+          {children}
+        </Slot>
+      )
+    }
     return (
-      <Comp
+      <button
         ref={ref}
-        className={cn(buttonVariants({ variant, size }), className)}
+        className={classes}
         disabled={disabled || loading}
         aria-busy={loading || undefined}
         {...props}
       >
         {loading && <Loader2 className="animate-spin" aria-hidden />}
         {children}
-      </Comp>
+      </button>
     )
   },
 )
