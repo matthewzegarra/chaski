@@ -35,9 +35,14 @@ def kyc_extract(
 ) -> dict[str, Any] | None:
     """`expected` (typed data) lets the local OCR mock simulate a reading; Azure ignores it."""
     # Anonymous onboarding: no user token to forward, use the service identity.
+    try:
+        token = service_token()
+    except Exception as exc:  # identity misconfigured: degrade like any ia-api failure
+        log.warning("service_token_failed", error_type=type(exc).__name__)
+        return None
     return _post(
         "/kyc/extract",
-        service_token(),
+        token,
         files={"image": (filename, image, content_type)},
         data={f"expected_{k}": v for k, v in expected.items()},
     )
