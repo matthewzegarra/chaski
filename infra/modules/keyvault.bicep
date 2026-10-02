@@ -13,6 +13,7 @@ param readerPrincipalIds array
 
 var secretsUser = '4633458b-17de-408a-b874-0445c86b69e6'
 var secretsOfficer = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
+var certificatesOfficer = 'a4417e6f-fecd-4de8-b567-7b0420556985'
 
 resource kv 'Microsoft.KeyVault/vaults@2023-07-01' = {
   name: name
@@ -51,6 +52,17 @@ resource officer 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: kv
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', secretsOfficer)
+    principalId: deployerObjectId
+    principalType: 'User'
+  }
+}
+
+// The deployer also manages the chaski-services certificate (service-to-service auth).
+resource certOfficer 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(kv.id, deployerObjectId, certificatesOfficer)
+  scope: kv
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', certificatesOfficer)
     principalId: deployerObjectId
     principalType: 'User'
   }

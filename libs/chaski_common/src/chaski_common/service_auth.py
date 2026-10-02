@@ -4,10 +4,11 @@
 dev:   short-lived HS256 token with role Operaciones.
 entra: token for the API audience with the Operaciones application role.
        - Same tenant: the Managed Identity itself holds the role (DefaultAzureCredential).
-       - Identity tenant different from the Azure tenant (ENTRA_SERVICE_CLIENT_ID set): the
-         Managed Identity gets an assertion for api://AzureADTokenExchange and exchanges it
-         for a token of the chaski-services app, which trusts that identity through a
-         federated credential. No secrets either way.
+       - Identity tenant different from the Azure tenant (ENTRA_SERVICE_CLIENT_ID set):
+         the chaski-services app authenticates with a certificate that Key Vault generated
+         and keeps (ENTRA_SERVICE_CERTIFICATE arrives as a Key Vault reference, PEM).
+         Entra does not accept a managed identity from another tenant as a federated
+         credential (AADSTS700236), so a certificate is the secretless-in-code option.
 """
 
 from __future__ import annotations
@@ -26,18 +27,14 @@ _cache: dict[str, tuple[str, float]] = {}
 @lru_cache
 def _credential() -> Any:
     settings = get_common_settings()
-    if settings.entra_service_client_id and settings.entra_tenant_id:
-        from azure.identity import ClientAssertionCredential, ManagedIdentityCredential
+    cert = settings.entra_service_certificate
+    if settings.entra_service_client_id and settings.entra_tenant_id and cert:
+        from azure.identity import CertificateCredential
 
-        mi = ManagedIdentityCredential(client_id=settings.azure_client_id)
-
-        def assertion() -> str:
-            return str(mi.get_token("api://AzureADTokenExchange/.default").token)
-
-        return ClientAssertionCredential(
+        return CertificateCredential(
             tenant_id=settings.entra_tenant_id,
             client_id=settings.entra_service_client_id,
-            func=assertion,
+            certificate_data=cert.get_secret_value().encode(),
         )
     from azure.identity import DefaultAzureCredential
 

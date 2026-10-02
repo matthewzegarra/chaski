@@ -90,7 +90,7 @@ var apis = [
   }
   {
     name: 'ca-core', image: 'chaski/core-api', tag: imageTag, id: 'core', chaskiEnv: 'DEV'
-    kvSecrets: [ 'database-url', 'analytics-db-url', 'fraud-webhook-secret' ]
+    kvSecrets: [ 'database-url', 'analytics-db-url', 'fraud-webhook-secret', 'chaski-services-cert' ]
     env: [
       { name: 'SERVICE_NAME', value: 'core-api' }
       { name: 'ANALYTICS_DB_URL', secretRef: 'analytics-db-url' }
@@ -104,6 +104,7 @@ var apis = [
       { name: 'PIPELINE_JOB_NAME', value: 'caj-pipeline' }
       { name: 'GITHUB_REPO', value: githubRepo }
       { name: 'ENTRA_SERVICE_CLIENT_ID', value: entra.servicesClientId }
+      { name: 'ENTRA_SERVICE_CERTIFICATE', secretRef: 'chaski-services-cert' }
     ]
   }
   {
