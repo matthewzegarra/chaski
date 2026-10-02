@@ -16,4 +16,5 @@ param entra = {
   apiScope: 'api://c386a571-a8b4-4de7-a54a-4e58adc7ff45/access_as_user'
   clienteClientId: 'cea85c07-0b4a-4764-884a-dffdd431e08f'
   consolaClientId: 'a99a8665-b857-42fc-ab54-5aa796ed2536'
+  servicesClientId: 'ac79dd93-8598-4359-a8e8-9388f2318597'
 }

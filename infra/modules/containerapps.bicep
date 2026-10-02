@@ -103,6 +103,7 @@ var apis = [
       { name: 'AZURE_RESOURCE_GROUP', value: resourceGroup().name }
       { name: 'PIPELINE_JOB_NAME', value: 'caj-pipeline' }
       { name: 'GITHUB_REPO', value: githubRepo }
+      { name: 'ENTRA_SERVICE_CLIENT_ID', value: entra.servicesClientId }
     ]
   }
   {
@@ -116,6 +117,8 @@ var apis = [
       { name: 'ANALYTICS_DIALECT', value: 'postgres' }
       { name: 'AZURE_OPENAI_ENDPOINT', value: openAi.endpoint }
       { name: 'AZURE_OPENAI_DEPLOYMENT', value: openAi.deployment }
+      { name: 'AZURE_OPENAI_API_VERSION', value: '2025-04-01-preview' }
+      { name: 'AZURE_OPENAI_REASONING_EFFORT', value: 'minimal' }
       { name: 'CONTENT_SAFETY_ENDPOINT', value: openAi.contentSafetyEndpoint }
       { name: 'DOCINTEL_ENDPOINT', value: openAi.docIntelEndpoint }
     ]
