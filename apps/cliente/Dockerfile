@@ -2,7 +2,7 @@
 # Chaski App (PWA). Build context: repository root (pnpm workspace).
 
 # ---------- build the static bundle
-FROM node:22-alpine3.22 AS build
+FROM node:26-alpine3.22 AS build
 RUN npm install -g pnpm@12.3.4
 WORKDIR /src
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
@@ -15,7 +15,7 @@ COPY apps/cliente apps/cliente
 RUN pnpm --filter @chaski/cliente build
 
 # ---------- serve with unprivileged nginx; env.js + CSP generated at start (D7, D32)
-FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.31-alpine AS runtime
 LABEL org.opencontainers.image.title="chaski-cliente" \
       org.opencontainers.image.description="Interbank CHASKI - Chaski App (PWA)"
 COPY docker/web/nginx.conf /etc/nginx/conf.d/default.conf
