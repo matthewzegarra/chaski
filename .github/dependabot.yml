@@ -30,6 +30,11 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    # Major jumps of base images (e.g. Node 22 -> 26, PostgreSQL 16 -> 17) are planned
+    # changes reviewed on purpose, not weekly bumps (D57).
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       base-images:
         patterns: ["*"]
