@@ -1,5 +1,7 @@
 # Interbank CHASKI · Banca Inteligente en Tiempo Real
 
+[![cuentas-api CI/CD](https://github.com/Matthewzegarra0312/chaski/actions/workflows/cuentas-api.yml/badge.svg?branch=develop)](https://github.com/Matthewzegarra0312/chaski/actions/workflows/cuentas-api.yml)
+
 Proyecto final del curso **IT for Banking** (UTP + Interbank). Banco 100 % digital construido para Azure con IA generativa responsable, que corre completo **en local con Docker Compose sin Azure** y pasa a Azure **solo cambiando variables de entorno**.
 
 | Pieza | Qué es |
@@ -109,6 +111,16 @@ uv run ruff check . && uv run mypy libs/chaski_common/src services/*/src simulat
 pnpm -r test && pnpm lint                     # frontend + accesibilidad (axe) + ESLint + tipos
 uv run python scripts/gen_api_docs.py         # regenera docs/API.md
 ```
+
+## CI/CD
+
+`cuentas-api` tiene CI/CD completo en GitHub Actions ([`.github/workflows/cuentas-api.yml`](.github/workflows/cuentas-api.yml)):
+
+- **Cada PR:** lint, tipos, tests contra PostgreSQL real con cobertura ≥ 70 %, build y escaneo Trivy.
+- **`develop` → DEV, `release/*` → TEST:** publicación en ACR con OIDC (sin secretos) y deploy a Container Apps con smoke test y rollback automático.
+- **PROD:** promoción manual de la misma imagen probada en TEST.
+
+Ramas, configuración de Azure/OIDC paso a paso, rollback y solución de problemas: **[docs/CICD.md](docs/CICD.md)**.
 
 ## Pasar a Azure
 

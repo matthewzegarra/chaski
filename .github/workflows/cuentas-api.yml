@@ -341,10 +341,11 @@ jobs:
         if: steps.cfg.outputs.configured == 'true'
         env:
           ACR_NAME: ${{ vars.ACR_NAME }}
+        # imagetools only re-publishes the manifest: needs AcrPush, not importImage (D64).
         run: |
-          az acr import --name "$ACR_NAME" --force \
-            --source "${ACR_NAME}.azurecr.io/${IMAGE_NAME}:${IMAGE_TAG}" \
-            --image "${IMAGE_NAME}:${ENV_TAG}"
+          az acr login --name "$ACR_NAME"
+          repo="${ACR_NAME}.azurecr.io/${IMAGE_NAME}"
+          docker buildx imagetools create --tag "${repo}:${ENV_TAG}" "${repo}:${IMAGE_TAG}"
 
   deploy-test:
     name: Deploy TEST
@@ -465,4 +466,4 @@ jobs:
         env:
           ACR_NAME: ${{ vars.ACR_NAME }}
           IMAGE: ${{ steps.promote.outputs.image }}
-        run: az acr import --name "$ACR_NAME" --force --source "$IMAGE" --image "${IMAGE_NAME}:prod"
+        run: docker buildx imagetools create --tag "${ACR_NAME}.azurecr.io/${IMAGE_NAME}:prod" "$IMAGE"
