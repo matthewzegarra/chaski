@@ -302,6 +302,36 @@ resource ghDeploy 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for i 
   }
 }]
 
+// Updating an app is a linked write on its environment (managedEnvironments/join).
+// A minimal custom role grants just that instead of Contributor on the environment.
+resource joinRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
+  name: guid(resourceGroup().id, 'chaski-cae-join')
+  properties: {
+    roleName: 'CHASKI Container Apps environment joiner (${resourceGroup().name})'
+    description: 'Read and join the CHASKI Container Apps environment; used by GitHub Actions deploys.'
+    type: 'CustomRole'
+    assignableScopes: [ resourceGroup().id ]
+    permissions: [
+      {
+        actions: [
+          'Microsoft.App/managedEnvironments/read'
+          'Microsoft.App/managedEnvironments/join/action'
+        ]
+      }
+    ]
+  }
+}
+
+resource ghJoin 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(cae.id, githubPrincipalId, joinRole.id)
+  scope: cae
+  properties: {
+    roleDefinitionId: joinRole.id
+    principalId: githubPrincipalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
 resource cuentasIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = {
   name: last(split(identities.cuentas.id, '/'))
 }
