@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1.7
 # "tools" image: Alembic migrations + the simulator. Build context: repository root.
-FROM python:3.12-slim AS builder
+
+# ---------- build
+FROM python:3.12-slim-bookworm AS builder
 COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never \
     UV_PROJECT_ENVIRONMENT=/opt/venv
@@ -18,7 +20,10 @@ COPY simulator simulator
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --package chaski-simulator --no-editable
 
-FROM python:3.12-slim AS runtime
+# ---------- runtime (one-off jobs: migrate, seed, live)
+FROM python:3.12-slim-bookworm AS runtime
+LABEL org.opencontainers.image.title="chaski-tools" \
+      org.opencontainers.image.description="Interbank CHASKI - migraciones y simulador"
 RUN useradd --system --uid 10001 --no-create-home chaski
 COPY --from=builder /opt/venv /opt/venv
 WORKDIR /app

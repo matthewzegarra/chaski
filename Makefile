@@ -1,5 +1,5 @@
 # Convenience targets. Without `make`, run the commands on the right directly.
-.PHONY: up down build seed live migrate logs test test-py test-web lint fmt lock
+.PHONY: up down build seed live migrate logs test test-py test-web lint fmt lock docs
 
 up:            ## Start the whole stack
 	docker compose up -d --build
@@ -42,3 +42,6 @@ fmt:
 	uv run ruff format .
 	uv run ruff check --fix .
 	pnpm -r format
+
+docs:          ## Regenerate docs/API.md from the services
+	uv run python scripts/gen_api_docs.py

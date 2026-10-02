@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./theme.css": "./src/styles/theme.css"
+    "./theme.css": "./src/styles/theme.css",
+    "./testing/axe": "./src/testing/axe.ts"
   },
   "scripts": {
     "test": "vitest run",
@@ -40,6 +41,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "typescript": "~5.9.3",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.3",
+    "axe-core": "^4.13.0"
   }
 }

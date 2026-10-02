@@ -51,6 +51,25 @@ def _add_correlation_id(_logger: Any, _method: str, event_dict: dict[str, Any]) 
     return event_dict
 
 
+class RedactingFilter(logging.Filter):
+    """Redacts PII from records before *any* handler sees them (stdout or the OpenTelemetry
+    exporter). structlog events are already redacted; this covers third-party log calls."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, dict):
+            record.msg = _redact_value(record.msg)
+            return True
+        try:
+            message = record.getMessage()
+        except Exception:
+            message = str(record.msg)
+        record.msg = redact(message)
+        record.args = None
+        if record.exc_text:
+            record.exc_text = redact(record.exc_text)
+        return True
+
+
 def configure_logging(service_name: str, level: str = "INFO") -> None:
     shared: list[Any] = [
         structlog.contextvars.merge_contextvars,
@@ -76,6 +95,7 @@ def configure_logging(service_name: str, level: str = "INFO") -> None:
     )
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(formatter)
+    handler.addFilter(RedactingFilter())
     root = logging.getLogger()
     root.handlers = [handler]
     root.setLevel(level.upper())

@@ -1,7 +1,12 @@
 # syntax=docker/dockerfile:1.7
-# Build context: repository root (the uv workspace).
-FROM python:3.12-slim AS builder
+# ia-api. Build context: repository root (the uv workspace).
+
+# ---------- build: resolve the locked dependencies into /opt/venv
+FROM python:3.12-slim-bookworm AS builder
 COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /usr/local/bin/uv
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends unixodbc-dev g++ \
+    && rm -rf /var/lib/apt/lists/*
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never \
     UV_PROJECT_ENVIRONMENT=/opt/venv
 WORKDIR /src
@@ -18,7 +23,21 @@ COPY services/ia-api services/ia-api
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --package ia-api --no-editable
 
-FROM python:3.12-slim AS runtime
+# ---------- runtime: slim, non-root, ODBC 18 for Azure SQL, versioned prompts
+FROM python:3.12-slim-bookworm AS runtime
+LABEL org.opencontainers.image.title="chaski-ia-api" \
+      org.opencontainers.image.description="Interbank CHASKI - ia-api"
+# Microsoft ODBC Driver 18: KPIs and NL2SQL read gold from Azure SQL in the cloud.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl gnupg ca-certificates \
+    && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+       | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
+    && echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" \
+       > /etc/apt/sources.list.d/mssql-release.list \
+    && apt-get update \
+    && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 unixodbc \
+    && apt-get purge -y curl gnupg && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
 RUN useradd --system --uid 10001 --no-create-home chaski
 COPY --from=builder /opt/venv /opt/venv
 # Versioned prompts (genai/prompts/*.md) are loaded at runtime and logged with their version.

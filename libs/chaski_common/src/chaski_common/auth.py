@@ -182,6 +182,8 @@ def require_roles(*roles: Role) -> Callable[..., CurrentUser]:
             raise deny(request, user)
         return user
 
+    # Read by scripts/gen_api_docs.py so docs/API.md lists the roles actually enforced.
+    dependency.__chaski_roles__ = sorted(r.value for r in allowed)  # type: ignore[attr-defined]
     return dependency
 
 
@@ -192,3 +194,7 @@ def require_customer(
     if Role.CLIENTE not in user.roles or user.customer_id is None:
         raise deny(request, user)
     return user
+
+
+require_customer.__chaski_roles__ = ["Cliente (sus propios datos)"]  # type: ignore[attr-defined]
+get_current_user.__chaski_roles__ = ["Cualquier usuario autenticado"]  # type: ignore[attr-defined]
