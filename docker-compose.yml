@@ -1,0 +1,146 @@
+# CHASKI local stack. Usage:
+#   cp .env.example .env
+#   docker compose up -d --build
+#   docker compose run --rm seed        (or: make seed)
+name: chaski
+
+x-api-env: &api-env
+  CHASKI_ENV: ${CHASKI_ENV:-DEV}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  AUTH_MODE: ${AUTH_MODE:-dev}
+  DEV_JWT_SECRET: ${DEV_JWT_SECRET:?Set DEV_JWT_SECRET in .env}
+  ENTRA_TENANT_ID: ${ENTRA_TENANT_ID:-}
+  ENTRA_AUDIENCE: ${ENTRA_AUDIENCE:-}
+  ENTRA_ISSUERS: ${ENTRA_ISSUERS:-}
+  ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001}
+  RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-300}
+  DEMO_MODE: ${DEMO_MODE:-true}
+  DATABASE_URL: postgresql+psycopg://chaski_app:${CHASKI_APP_DB_PASSWORD}@postgres:5432/chaski
+  APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING:-}
+  CUENTAS_API_URL: http://cuentas-api:8000
+  CORE_API_URL: http://core-api:8000
+  IA_API_URL: http://ia-api:8000
+
+x-tools: &tools
+  build:
+    context: .
+    dockerfile: simulator/Dockerfile
+  image: chaski/tools:local
+  environment:
+    MIGRATIONS_DATABASE_URL: postgresql+psycopg://chaski_admin:${POSTGRES_PASSWORD}@postgres:5432/chaski
+    CUENTAS_API_URL: http://cuentas-api:8000
+    CORE_API_URL: http://core-api:8000
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: chaski
+      POSTGRES_USER: chaski_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      CHASKI_APP_DB_PASSWORD: ${CHASKI_APP_DB_PASSWORD:?Set CHASKI_APP_DB_PASSWORD in .env}
+      CHASKI_READONLY_DB_PASSWORD: ${CHASKI_READONLY_DB_PASSWORD:?Set CHASKI_READONLY_DB_PASSWORD in .env}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chaski_admin -d chaski"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Applies Alembic migrations on every `up`, then exits.
+  migrate:
+    <<: *tools
+    restart: "no"
+
+  # One-off: migrations + full synthetic dataset. `docker compose run --rm seed`
+  seed:
+    <<: *tools
+    profiles: ["tools"]
+    command: ["sh", "-c", "alembic -c db/alembic.ini upgrade head && python -m chaski_simulator --reset"]
+
+  # One-off: continuous transactions through cuentas-api. `docker compose run --rm live`
+  live:
+    <<: *tools
+    profiles: ["tools"]
+    command: ["python", "-m", "chaski_simulator", "--live"]
+
+  cuentas-api:
+    build:
+      context: .
+      dockerfile: services/cuentas-api/Dockerfile
+    image: chaski/cuentas-api:local
+    environment:
+      <<: *api-env
+      SERVICE_NAME: cuentas-api
+      EVENTSTREAM_CONNECTION_STRING: ${EVENTSTREAM_CONNECTION_STRING:-}
+      EVENTSTREAM_NAME: ${EVENTSTREAM_NAME:-}
+    ports:
+      - "8001:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  core-api:
+    build:
+      context: .
+      dockerfile: services/core-api/Dockerfile
+    image: chaski/core-api:local
+    environment:
+      <<: *api-env
+      SERVICE_NAME: core-api
+      ANALYTICS_DB_URL: postgresql+psycopg://chaski_app:${CHASKI_APP_DB_PASSWORD}@postgres:5432/chaski
+      ANALYTICS_DIALECT: ${ANALYTICS_DIALECT:-postgres}
+      FRAUD_WEBHOOK_SECRET: ${FRAUD_WEBHOOK_SECRET:-}
+      KEY_VAULT_URL: ${KEY_VAULT_URL:-}
+      BLOB_ACCOUNT_URL: ${BLOB_ACCOUNT_URL:-}
+      BLOB_CONTAINER: ${BLOB_CONTAINER:-kyc}
+      AZURE_SUBSCRIPTION_ID: ${AZURE_SUBSCRIPTION_ID:-}
+      AZURE_RESOURCE_GROUP: ${AZURE_RESOURCE_GROUP:-}
+      PIPELINE_JOB_NAME: ${PIPELINE_JOB_NAME:-}
+      GITHUB_REPO: ${GITHUB_REPO:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      UPLOADS_DIR: /data/uploads
+    volumes:
+      - uploads:/data/uploads
+    ports:
+      - "8002:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  ia-api:
+    build:
+      context: .
+      dockerfile: services/ia-api/Dockerfile
+    image: chaski/ia-api:local
+    environment:
+      <<: *api-env
+      SERVICE_NAME: ia-api
+      AI_MODE: ${AI_MODE:-mock}
+      ANALYTICS_DB_URL: postgresql+psycopg://chaski_app:${CHASKI_APP_DB_PASSWORD}@postgres:5432/chaski
+      NL2SQL_DB_URL: postgresql+psycopg://chaski_readonly:${CHASKI_READONLY_DB_PASSWORD}@postgres:5432/chaski
+      ANALYTICS_DIALECT: ${ANALYTICS_DIALECT:-postgres}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2024-10-21}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-}
+      CONTENT_SAFETY_ENDPOINT: ${CONTENT_SAFETY_ENDPOINT:-}
+      CONTENT_SAFETY_KEY: ${CONTENT_SAFETY_KEY:-}
+      DOCINTEL_ENDPOINT: ${DOCINTEL_ENDPOINT:-}
+      DOCINTEL_KEY: ${DOCINTEL_KEY:-}
+    ports:
+      - "8003:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:
+  uploads:

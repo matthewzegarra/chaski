@@ -1,0 +1,6 @@
+node_modules
+dist
+coverage
+.venv
+pnpm-lock.yaml
+*.md

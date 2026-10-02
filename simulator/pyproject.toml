@@ -1,0 +1,26 @@
+[project]
+name = "chaski-simulator"
+version = "0.1.0"
+description = "Synthetic data generator for CHASKI (customers, accounts, cards, loans, transactions, complaints, gold)."
+requires-python = ">=3.12"
+dependencies = [
+  "chaski-common",
+  "faker>=30.0",
+  "psycopg[binary]>=3.2",
+  "sqlalchemy>=2.0.36",
+  "alembic>=1.14",
+  "httpx>=0.27",
+]
+
+[project.scripts]
+chaski-sim = "chaski_simulator.__main__:main"
+
+[tool.uv.sources]
+chaski-common = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/chaski_simulator"]

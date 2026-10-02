@@ -1,0 +1,19 @@
+[project]
+name = "cuentas-api"
+version = "0.1.0"
+description = "Saldo, movimientos, transferencias y pagos con tarjeta."
+requires-python = ">=3.12"
+dependencies = [
+  "chaski-common",
+  "uvicorn[standard]>=0.32",
+]
+
+[tool.uv.sources]
+chaski-common = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cuentas_api"]
