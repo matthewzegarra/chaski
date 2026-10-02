@@ -20,6 +20,11 @@ class Base(DeclarativeBase):
     }
 
 
+def as_dict(obj: Base) -> dict[str, Any]:
+    """Column values of a mapped object (unset/unloaded columns included as None)."""
+    return {attr.key: getattr(obj, attr.key) for attr in obj.__mapper__.column_attrs}
+
+
 def _pk() -> Mapped[uuid.UUID]:
     return mapped_column(primary_key=True, server_default=text("gen_random_uuid()"))
 

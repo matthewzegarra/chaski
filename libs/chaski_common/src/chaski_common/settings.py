@@ -30,6 +30,8 @@ class CommonSettings(BaseSettings):
     rate_limit_per_minute: int = 300
 
     demo_mode: bool = False
+    eventstream_connection_string: str | None = None
+    eventstream_name: str | None = None
     applicationinsights_connection_string: str | None = None
 
     @property
