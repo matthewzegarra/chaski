@@ -159,7 +159,17 @@ async def start_onboarding(
     blob_path = storage.save_kyc_image(
         f"kyc/{customer.id}/{doc_id}.{EXT[content_type]}", image, content_type
     )
-    result = ia_client.kyc_extract(image, content_type, f"{doc_id}.{EXT[content_type]}")
+    result = ia_client.kyc_extract(
+        image,
+        content_type,
+        f"{doc_id}.{EXT[content_type]}",
+        {
+            "document_number": document_number,
+            "first_name": customer.first_name,
+            "last_name": customer.last_name,
+            "birth_date": birth_date.isoformat(),
+        },
+    )
     extracted = result.get("datos") if result else None
     confidence = result.get("confianza") if result else None
     db.add(

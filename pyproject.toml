@@ -38,6 +38,11 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "**/tests/**" = ["S105", "S106", "E501"]
 "simulator/src/chaski_simulator/catalog.py" = ["E501"]  # Spanish sample texts
+# Spanish texts, tool descriptions and SQL read better unwrapped.
+"services/ia-api/src/ia_api/assistant.py" = ["E501"]
+"services/ia-api/src/ia_api/routers/insights.py" = ["E501"]
+# The mock "model" builds SQL from constants by design; nl2sql.validate_sql guards it.
+"services/ia-api/src/ia_api/providers/mock_llm.py" = ["E501", "S608"]
 
 [tool.mypy]
 python_version = "3.12"

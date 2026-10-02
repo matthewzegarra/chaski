@@ -116,3 +116,24 @@ export interface FraudAlert {
   card_last4: string | null
   card_status: string | null
 }
+
+export interface ComplaintConsole {
+  id: string
+  customer_id: string
+  customer_name: string
+  subject: string
+  body: string
+  channel: string
+  status: 'NUEVA' | 'EN_REVISION' | 'RESUELTA'
+  ai_category: string | null
+  ai_urgency: 'ALTA' | 'MEDIA' | 'BAJA' | null
+  ai_confidence: number | null
+  ai_reason: string | null
+  ai_suspicious: boolean
+  requires_review: boolean
+  final_category: string | null
+  reviewed_by: string | null
+  created_at: string
+  due_at: string
+  business_days_left: number
+}

@@ -17,6 +17,7 @@ const PAGES: Record<string, ComponentType> = {
   clientes: page(() => import('./pages/Customers'), 'CustomersPage'),
   prestamos: page(() => import('./pages/Loans'), 'LoansPage'),
   fraude: page(() => import('./pages/Fraud'), 'FraudPage'),
+  quejas: page(() => import('./pages/Complaints'), 'ComplaintsPage'),
 }
 
 export function App() {

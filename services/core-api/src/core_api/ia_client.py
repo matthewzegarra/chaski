@@ -30,9 +30,17 @@ def _post(path: str, token: str, **kwargs: Any) -> dict[str, Any] | None:
         return None
 
 
-def kyc_extract(image: bytes, content_type: str, filename: str) -> dict[str, Any] | None:
+def kyc_extract(
+    image: bytes, content_type: str, filename: str, expected: dict[str, str]
+) -> dict[str, Any] | None:
+    """`expected` (typed data) lets the local OCR mock simulate a reading; Azure ignores it."""
     # Anonymous onboarding: no user token to forward, use the service identity.
-    return _post("/kyc/extract", service_token(), files={"image": (filename, image, content_type)})
+    return _post(
+        "/kyc/extract",
+        service_token(),
+        files={"image": (filename, image, content_type)},
+        data={f"expected_{k}": v for k, v in expected.items()},
+    )
 
 
 def classify_complaint(

@@ -21,8 +21,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM python:3.12-slim AS runtime
 RUN useradd --system --uid 10001 --no-create-home chaski
 COPY --from=builder /opt/venv /opt/venv
+# Versioned prompts (genai/prompts/*.md) are loaded at runtime and logged with their version.
+COPY genai/prompts /app/genai/prompts
 ENV PATH=/opt/venv/bin:$PATH PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
-    SERVICE_NAME=ia-api
+    SERVICE_NAME=ia-api PROMPTS_DIR=/app/genai/prompts
 USER 10001
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=15s --retries=3 \
