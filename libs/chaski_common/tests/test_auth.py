@@ -73,6 +73,12 @@ def test_customer_id_from_entra_extension_claims(claim: str) -> None:
     assert user.sub == "o1"
 
 
+def test_customer_id_unwraps_entra_array_value() -> None:
+    cid = uuid.uuid4()
+    user = user_from_claims({"oid": "o", "roles": ["Cliente"], "extn.customer_id": [str(cid)]}, "t")
+    assert user.customer_id == cid
+
+
 def test_customer_id_ignores_other_extensions() -> None:
     claims = {"sub": "s", "extension_c386a571a8b44de7a54a4e58adc7ff45_segment": "x"}
     assert customer_id_claim(claims) is None

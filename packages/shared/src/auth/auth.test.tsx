@@ -47,6 +47,13 @@ describe('userFromToken', () => {
     },
   )
 
+  it('unwraps the array value Entra uses for extension claims', () => {
+    const user = userFromToken(
+      fakeToken({ oid: 'o', roles: ['Cliente'], 'extn.customer_id': ['c-4'], exp: future }),
+    )
+    expect(user?.customerId).toBe('c-4')
+  })
+
   it('rejects expired or malformed tokens', () => {
     expect(userFromToken(fakeToken({ sub: 'u', exp: 1 }))).toBeNull()
     expect(userFromToken('garbage')).toBeNull()

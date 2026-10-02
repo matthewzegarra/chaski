@@ -114,14 +114,20 @@ _EXTENSION_CUSTOMER_ID = re.compile(r"^extension_[0-9a-f]{32}_customer_id$")
 
 
 def customer_id_claim(claims: dict[str, Any]) -> Any:
-    """customer_id as emitted by dev tokens or by an Entra directory extension
-    (`extension_<appId>_customer_id`, or `extn.customer_id` in some token versions)."""
+    """customer_id as emitted by dev tokens or by an Entra directory extension.
+
+    Entra emits directory extensions in JWTs as `extn.<name>` with an array value;
+    `extension_<appId>_<name>` is accepted too."""
+
+    def unwrap(value: Any) -> Any:
+        return value[0] if isinstance(value, list) and value else value
+
     for key in ("customer_id", "extension_customer_id", "extn.customer_id"):
         if claims.get(key):
-            return claims[key]
+            return unwrap(claims[key])
     for key, value in claims.items():
         if value and _EXTENSION_CUSTOMER_ID.match(key):
-            return value
+            return unwrap(value)
     return None
 
 
