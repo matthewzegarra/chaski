@@ -182,12 +182,12 @@ def executive_summary(k: dict[str, Any]) -> dict[str, Any]:
     text = (
         f"En {t['periodo']}, el margen financiero fue de {t['margen_mes']}, "
         f"lo que {direction} {t['variacion_margen_abs_pct']} frente al mes anterior. "
-        f"El producto más rentable fue {k['producto_top']} con un margen de {t['margen_producto_top']}. "
+        f"El producto más rentable fue {t['producto_top']} con un margen de {t['margen_producto_top']}. "
         f"La morosidad mayor a {k['umbral_mora_dias']} días se ubica en {t['mora_pct']}, con {k['region_mayor_mora']} "
         f"como la región más afectada ({t['mora_region_top_pct']}). "
         f"La cartera de clientes suma {t['clientes']} clientes. "
         f"Recomendamos reforzar la cobranza temprana en {k['region_mayor_mora']} y priorizar el "
-        f"crecimiento de {k['producto_top']}."
+        f"crecimiento de {t['producto_top']}."
     )
     return {"resumen": text}
 

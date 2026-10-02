@@ -45,6 +45,9 @@
   --warning: #b45309;
   --ring: #1f5aa3;
   --radius: 0.75rem;
+  /* Chart series, validated with the dataviz palette checker (light, on #ffffff). */
+  --series-1: #1f5aa3;
+  --series-2: #00a94f;
 }
 
 .dark {
@@ -66,6 +69,9 @@
   --destructive-foreground: #1a0505;
   --warning: #f59e0b;
   --ring: #6f93c5;
+  /* Dark steps of the same hues, validated on #111d31. */
+  --series-1: #3d7fd9;
+  --series-2: #22a861;
 }
 
 @theme inline {

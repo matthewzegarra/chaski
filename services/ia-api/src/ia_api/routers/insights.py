@@ -28,6 +28,12 @@ MONTHS = (
     "octubre", "noviembre", "diciembre",
 )  # fmt: skip
 NL2SQL_TIMEOUT_MS = 10_000
+PRODUCT_NAMES = {
+    "AHORRO_SOLES": "la cuenta de ahorros en soles",
+    "AHORRO_DOLARES": "la cuenta de ahorros en dólares",
+    "PRESTAMO_CONSUMO": "el préstamo de consumo",
+    "TARJETA_CREDITO": "la tarjeta de crédito",
+}
 
 
 @lru_cache
@@ -144,6 +150,7 @@ def compute_kpis(today: date | None = None) -> dict[str, Any]:
         "clientes": int(clients or 0),
         "texto": {
             "periodo": f"{MONTHS[month.month - 1]} de {month.year}",
+            "producto_top": PRODUCT_NAMES.get(top["producto"], top["producto"]),
             "margen_mes": _millions(margin),
             "variacion_margen_abs_pct": f"{abs(variation):.1f} %",
             "margen_producto_top": _money(float(top["margen"])),

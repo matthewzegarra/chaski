@@ -223,6 +223,7 @@ export function OperationsPage() {
                     />
                     <Tooltip content={<ChartTooltip />} cursor={{ fill: 'var(--muted)' }} />
                     <Bar
+                      isAnimationActive={false}
                       dataKey="cantidad"
                       fill="var(--color-brand-500)"
                       radius={[4, 4, 0, 0]}

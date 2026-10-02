@@ -11,7 +11,7 @@ from typing import Any
 from chaski_common import audit, events, fraud, ledger
 from chaski_common.auth import CurrentUser, client_ip, require_roles
 from chaski_common.db import get_db
-from chaski_common.models import Account, Customer, RawIngest
+from chaski_common.models import Account, AuditLog, Customer, RawIngest
 from chaski_common.roles import Role
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -120,3 +120,38 @@ def fraud_burst(
         resource_id=str(account.customer_id), ip=client_ip(request),
     )  # fmt: skip
     return {"customer_id": str(account.customer_id), "transfers": BURST_SIZE, "alerts": rules}
+
+
+@router.post("/forbidden-access", dependencies=[Depends(_require_demo)])
+def forbidden_access(
+    request: Request,
+    user: CurrentUser = Depends(require_roles(Role.ADMIN)),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Entra-mode stand-in for "Probar acceso indebido": records exactly the audit entry a
+    Marketing user gets when calling reveal-pii (with AUTH_MODE=dev the console makes the real
+    call with a Marketing token instead)."""
+    customer_id = db.scalar(select(Customer.id).limit(1))
+    path = f"/api/v1/customers/{customer_id}/reveal-pii"
+    marketing = CurrentUser(
+        sub="demo.marketing", name="Demo Marketing", roles=frozenset({Role.MARKETING}),
+        customer_id=None, token="",
+    )  # fmt: skip
+    audit.record(
+        actor=marketing, action=f"POST {path}", resource=path, allowed=False,
+        ip=client_ip(request), reason=f"Simulación desde Modo Demo por {user.sub}",
+    )  # fmt: skip
+    entry = db.scalars(select(AuditLog).order_by(AuditLog.id.desc()).limit(1)).one()
+    return {
+        "status_code": 403,
+        "detail": "No tienes permiso para realizar esta acción",
+        "simulated": True,
+        "audit": {
+            "id": entry.id,
+            "actor_id": entry.actor_id,
+            "actor_role": entry.actor_role,
+            "action": entry.action,
+            "allowed": entry.allowed,
+            "created_at": entry.created_at.isoformat(),
+        },
+    }

@@ -99,3 +99,13 @@ def test_demo_is_admin_only_and_needs_demo_mode(
         client.post("/api/v1/demo/inject-bad-record", headers=headers(Role.ADMIN)).status_code
         == 404
     )
+
+
+def test_forbidden_access_demo_writes_a_denied_audit_entry(client: TestClient, s: Session) -> None:
+    make_customer(s)
+    body = client.post(
+        "/api/v1/demo/forbidden-access", headers=headers(Role.ADMIN, sub="andrea")
+    ).json()
+    assert body["status_code"] == 403 and body["simulated"] is True
+    assert body["audit"]["actor_role"] == "Marketing" and body["audit"]["allowed"] is False
+    assert body["audit"]["action"].endswith("/reveal-pii")
