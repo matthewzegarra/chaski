@@ -1,0 +1,199 @@
+# CI/CD of cuentas-api, the critical CHASKI service.
+# The name and branches matter: the console's DevOps module infers the environment from them
+# (main -> PROD, release/* -> TEST, otherwise DEV). See docs/prompts/PROMPT_GITHUB_ACTIONS_CUENTAS_API.md.
+name: cuentas-api CI/CD
+
+on:
+  pull_request:
+    branches: [develop, "release/**", main]
+    paths: &service_paths
+      - "services/cuentas-api/**"
+      - "libs/chaski_common/**"
+      - "db/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "conftest.py"
+      - ".github/workflows/cuentas-api.yml"
+  push:
+    branches: [develop, "release/**", main]
+    paths: *service_paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One run per PR/branch; superseded PR runs are cancelled (deploys never are).
+  group: cuentas-api-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  UV_VERSION: "0.11.x"
+  PYTHON_VERSION: "3.12"
+  IMAGE_NAME: chaski/cuentas-api
+
+jobs:
+  lint:
+    name: Lint and types
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install workspace (locked)
+        run: uv sync --all-packages --frozen
+      - name: Ruff lint
+        run: uv run ruff check . --output-format github
+      - name: Ruff format
+        run: uv run ruff format --check .
+      - name: Mypy
+        run: uv run mypy libs/chaski_common/src services/cuentas-api/src
+
+  test:
+    name: Tests and coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Ephemeral database passwords
+        # Random per run and masked: never real secrets.
+        run: |
+          for var in POSTGRES_PASSWORD CHASKI_APP_DB_PASSWORD CHASKI_READONLY_DB_PASSWORD; do
+            value="$(openssl rand -hex 16)"
+            echo "::add-mask::${value}"
+            echo "${var}=${value}" >> "$GITHUB_ENV"
+          done
+
+      - name: Start PostgreSQL 16 with the repo's init scripts
+        # A `services:` container starts before checkout and cannot mount db/init (D53).
+        run: |
+          docker run -d --name chaski-pg -p 5432:5432 \
+            -e POSTGRES_DB=chaski -e POSTGRES_USER=chaski_admin \
+            -e POSTGRES_PASSWORD -e CHASKI_APP_DB_PASSWORD -e CHASKI_READONLY_DB_PASSWORD \
+            -v "${GITHUB_WORKSPACE}/db/init:/docker-entrypoint-initdb.d:ro" \
+            postgres:16-alpine
+          # TCP readiness only succeeds once init scripts finished and the final server is up.
+          for _ in $(seq 1 60); do
+            if docker exec chaski-pg pg_isready -h 127.0.0.1 -U chaski_admin -d chaski_test >/dev/null 2>&1; then
+              echo "PostgreSQL ready"; exit 0
+            fi
+            sleep 1
+          done
+          docker logs chaski-pg
+          exit 1
+
+      - name: Install workspace (locked)
+        run: uv sync --all-packages --frozen
+
+      - name: Pytest (cuentas-api + chaski_common, coverage >= 70 %)
+        run: >-
+          uv run pytest services/cuentas-api libs/chaski_common
+          --cov=cuentas_api --cov=chaski_common
+          --cov-report=xml --cov-report=term
+          --cov-fail-under=70
+          --junitxml=junit.xml
+
+      - name: Test summary
+        if: always()
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import os, xml.etree.ElementTree as ET
+          print("## cuentas-api · tests")
+          if os.path.exists("junit.xml"):
+              root = ET.parse("junit.xml").getroot()
+              suite = root if root.tag == "testsuite" else root.find("testsuite")
+              total, failed = int(suite.get("tests", 0)), int(suite.get("failures", 0)) + int(suite.get("errors", 0))
+              skipped = int(suite.get("skipped", 0))
+              print(f"| Tests | Pasaron | Fallaron | Omitidos |\n|---|---|---|---|\n| {total} | {total - failed - skipped} | {failed} | {skipped} |")
+          if os.path.exists("coverage.xml"):
+              rate = float(ET.parse("coverage.xml").getroot().get("line-rate", 0)) * 100
+              status = "✅" if rate >= 70 else "❌"
+              print(f"\n**Cobertura (cuentas_api + chaski_common):** {rate:.1f} % {status} (mínimo 70 %)")
+          EOF
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cuentas-api-test-reports
+          path: |
+            coverage.xml
+            junit.xml
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: PostgreSQL logs on failure
+        if: failure()
+        run: docker logs chaski-pg 2>&1 | tail -50
+
+  image:
+    name: Build and scan image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: type=sha,format=long
+          labels: |
+            org.opencontainers.image.title=chaski-cuentas-api
+            org.opencontainers.image.description=Interbank CHASKI - cuentas-api
+
+      - name: Build (no push in CI)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: services/cuentas-api/Dockerfile
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          load: true
+          push: false
+          cache-from: type=gha,scope=cuentas-api
+          cache-to: type=gha,scope=cuentas-api,mode=max
+
+      - name: Trivy · fail on fixable CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+      - name: Trivy · full report (HIGH + CRITICAL)
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          format: sarif
+          output: trivy-cuentas-api.sarif
+          skip-setup-trivy: true
+
+      - name: Upload Trivy report
+        # Code scanning needs GitHub Advanced Security on private repos (not in Pro): artifact instead (D55).
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cuentas-api-trivy
+          path: trivy-cuentas-api.sarif
+          if-no-files-found: ignore
+          retention-days: 14

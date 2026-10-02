@@ -1,0 +1,35 @@
+# Weekly, grouped dependency updates (one PR per ecosystem) to keep noise and CI minutes low.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      python:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directories:
+      - /services/cuentas-api
+      - /services/core-api
+      - /services/ia-api
+      - /simulator
+      - /apps/cliente
+      - /apps/consola
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      base-images:
+        patterns: ["*"]
