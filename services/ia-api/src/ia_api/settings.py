@@ -26,6 +26,8 @@ class IaSettings(CommonSettings):
     azure_openai_api_key: SecretStr | None = None
     azure_openai_api_version: str = "2024-10-21"
     azure_openai_deployment: str | None = None
+    # Set for reasoning models (gpt-5 family: minimal|low|medium|high); they reject temperature.
+    azure_openai_reasoning_effort: str | None = None
 
     content_safety_endpoint: str | None = None
     content_safety_key: SecretStr | None = None

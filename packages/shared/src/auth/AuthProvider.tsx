@@ -54,12 +54,25 @@ export function decodeJwt(token: string): Record<string, unknown> | null {
   }
 }
 
+const EXTENSION_CUSTOMER_ID = /^extension_[0-9a-f]{32}_customer_id$/
+
+/** customer_id from dev tokens or an Entra directory extension (mirrors chaski_common.auth). */
+export function customerIdClaim(claims: Record<string, unknown>): unknown {
+  // Entra emits directory extensions in JWTs as `extn.<name>` with an array value.
+  const unwrap = (v: unknown) => (Array.isArray(v) ? v[0] : v)
+  for (const key of ['customer_id', 'extension_customer_id', 'extn.customer_id']) {
+    if (claims[key]) return unwrap(claims[key])
+  }
+  const ext = Object.keys(claims).find((k) => EXTENSION_CUSTOMER_ID.test(k) && claims[k])
+  return ext ? unwrap(claims[ext]) : undefined
+}
+
 export function userFromToken(token: string): AuthUser | null {
   const claims = decodeJwt(token)
   if (!claims) return null
   const exp = typeof claims.exp === 'number' ? claims.exp : 0
   if (exp * 1000 < Date.now()) return null
-  const cid = claims.customer_id ?? claims.extension_customer_id
+  const cid = customerIdClaim(claims)
   return {
     sub: String(claims.oid ?? claims.sub ?? ''),
     name: String(claims.name ?? claims.preferred_username ?? 'Usuario'),

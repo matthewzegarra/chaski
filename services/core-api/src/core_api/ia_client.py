@@ -13,15 +13,19 @@ from core_api.settings import get_settings
 
 log = get_logger(__name__)
 TIMEOUT = httpx.Timeout(20.0, connect=3.0)
+# Document Intelligence polls the analysis and ia-api may be waking up from zero replicas.
+KYC_TIMEOUT = httpx.Timeout(60.0, connect=5.0)
 
 
-def _post(path: str, token: str, **kwargs: Any) -> dict[str, Any] | None:
+def _post(
+    path: str, token: str, timeout: httpx.Timeout = TIMEOUT, **kwargs: Any
+) -> dict[str, Any] | None:
     url = f"{get_settings().ia_api_url}/api/v1{path}"
     headers = {"Authorization": f"Bearer {token}"}
     if cid := correlation_id_var.get():
         headers["X-Correlation-ID"] = cid
     try:
-        resp = httpx.post(url, headers=headers, timeout=TIMEOUT, **kwargs)
+        resp = httpx.post(url, headers=headers, timeout=timeout, **kwargs)
         resp.raise_for_status()
         data: dict[str, Any] = resp.json()
         return data
@@ -35,9 +39,15 @@ def kyc_extract(
 ) -> dict[str, Any] | None:
     """`expected` (typed data) lets the local OCR mock simulate a reading; Azure ignores it."""
     # Anonymous onboarding: no user token to forward, use the service identity.
+    try:
+        token = service_token()
+    except Exception as exc:  # identity misconfigured: degrade like any ia-api failure
+        log.warning("service_token_failed", error_type=type(exc).__name__)
+        return None
     return _post(
         "/kyc/extract",
-        service_token(),
+        token,
+        timeout=KYC_TIMEOUT,
         files={"image": (filename, image, content_type)},
         data={f"expected_{k}": v for k, v in expected.items()},
     )

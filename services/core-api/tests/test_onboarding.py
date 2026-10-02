@@ -49,6 +49,21 @@ def test_onboarding_without_ia_creates_pending_customer(
     assert ia["calls"][0][0] == "/kyc/extract"
 
 
+def test_onboarding_survives_service_identity_failure(
+    client: TestClient, s: Session, ia: dict[str, Any], monkeypatch: Any
+) -> None:
+    from core_api import ia_client
+
+    def broken() -> str:
+        raise RuntimeError("AADSTS700236")
+
+    monkeypatch.setattr(ia_client, "service_token", broken)
+    resp = _start(client)
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["extracted"] is None
+    assert ia["calls"] == []
+
+
 def test_onboarding_with_ia_extraction_compares_fields(
     client: TestClient, s: Session, ia: dict[str, Any]
 ) -> None:

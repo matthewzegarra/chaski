@@ -25,6 +25,10 @@ class CommonSettings(BaseSettings):
     entra_audience: str | None = None
     # Comma-separated list. Defaults to the v1 and v2 issuers of the tenant.
     entra_issuers: str | None = None
+    # Service-to-service across tenants: chaski-services app id + its certificate (PEM with
+    # private key, injected from Key Vault). See service_auth.py.
+    entra_service_client_id: str | None = None
+    entra_service_certificate: SecretStr | None = None
 
     allowed_origins: str = "http://localhost:3000,http://localhost:3001"
     rate_limit_per_minute: int = 300
