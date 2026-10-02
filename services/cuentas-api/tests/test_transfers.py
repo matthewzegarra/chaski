@@ -36,7 +36,7 @@ def test_internal_transfer_moves_money_and_returns_receipt(client: TestClient, s
     assert receipt["operation"] == "TRANSFERENCIA"
     assert receipt["internal"] is True
     assert receipt["new_balance"] == 849.75
-    assert _balance(s, src) == Decimal("849.75")
+    assert _balance(s, src) == Decimal("850.00")  # deliberately wrong (CI red test)
     assert _balance(s, dst) == Decimal("160.25")
     types = set(s.scalars(select(Transaction.type)))
     assert types == {"TRANSFERENCIA_OUT", "TRANSFERENCIA_IN"}
