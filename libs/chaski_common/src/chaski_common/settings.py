@@ -25,6 +25,10 @@ class CommonSettings(BaseSettings):
     entra_audience: str | None = None
     # Comma-separated list. Defaults to the v1 and v2 issuers of the tenant.
     entra_issuers: str | None = None
+    # Service-to-service across tenants: chaski-services app id + the Managed Identity
+    # (AZURE_CLIENT_ID) whose assertion it trusts. See service_auth.py.
+    entra_service_client_id: str | None = None
+    azure_client_id: str | None = None
 
     allowed_origins: str = "http://localhost:3000,http://localhost:3001"
     rate_limit_per_minute: int = 300

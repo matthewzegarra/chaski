@@ -6,6 +6,7 @@ AUTH_MODE=dev validates HS256 tokens issued by core-api's /dev/token (local only
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from collections.abc import Callable, Iterable
@@ -109,8 +110,23 @@ def decode_token(token: str, settings: CommonSettings | None = None) -> dict[str
     return claims
 
 
+_EXTENSION_CUSTOMER_ID = re.compile(r"^extension_[0-9a-f]{32}_customer_id$")
+
+
+def customer_id_claim(claims: dict[str, Any]) -> Any:
+    """customer_id as emitted by dev tokens or by an Entra directory extension
+    (`extension_<appId>_customer_id`, or `extn.customer_id` in some token versions)."""
+    for key in ("customer_id", "extension_customer_id", "extn.customer_id"):
+        if claims.get(key):
+            return claims[key]
+    for key, value in claims.items():
+        if value and _EXTENSION_CUSTOMER_ID.match(key):
+            return value
+    return None
+
+
 def user_from_claims(claims: dict[str, Any], token: str) -> CurrentUser:
-    raw_cid = claims.get("customer_id") or claims.get("extension_customer_id")
+    raw_cid = customer_id_claim(claims)
     customer_id: uuid.UUID | None = None
     if raw_cid:
         try:
