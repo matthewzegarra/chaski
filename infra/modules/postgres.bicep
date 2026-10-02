@@ -43,7 +43,15 @@ resource tls 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2024-08-0
   properties: { value: 'TLSv1.2', source: 'user-override' }
 }
 
-resource diag 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+// Azure only allows extensions listed here; migration 0001 needs pgcrypto.
+resource extensions 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2024-08-01' = {
+  parent: pg
+  name: 'azure.extensions'
+  properties: { value: 'PGCRYPTO', source: 'user-override' }
+  dependsOn: [ tls ]
+}
+
+resource diag'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
   name: 'to-log-analytics'
   scope: pg
   properties: {

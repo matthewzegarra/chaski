@@ -221,7 +221,9 @@ resource webApps 'Microsoft.App/containerApps@2024-03-01' = [for w in webs: {
 // the nightly cron is added with the data phase).
 var jobs = [
   {
-    name: 'caj-migrate', image: 'chaski/tools'
+    name: 'caj-migrate', image: 'chaski/tools', hasImage: true
+    // Roles first (no init hook in managed PostgreSQL), then schema, then synthetic data.
+    command: [ 'sh', '-c', 'python db/bootstrap_roles.py && alembic -c db/alembic.ini upgrade head && python -m chaski_simulator --reset' ]
     kvSecrets: [ 'migrations-database-url', 'pg-app-password', 'pg-readonly-password' ]
     env: [
       { name: 'MIGRATIONS_DATABASE_URL', secretRef: 'migrations-database-url' }
@@ -230,7 +232,9 @@ var jobs = [
     ]
   }
   {
-    name: 'caj-pipeline', image: 'chaski/pipeline'
+    // The pipeline image arrives with the data phase; until then it keeps the sample image.
+    name: 'caj-pipeline', image: 'chaski/pipeline', hasImage: false
+    command: []
     kvSecrets: [ 'database-url' ]
     env: [
       { name: 'DATABASE_URL', secretRef: 'database-url' }
@@ -262,7 +266,8 @@ resource jobRes 'Microsoft.App/jobs@2024-03-01' = [for j in jobs: {
       containers: [
         {
           name: 'job'
-          image: usePlaceholderImages ? placeholderImage : '${acrLoginServer}/${j.image}:${imageTag}'
+          image: usePlaceholderImages || !j.hasImage ? placeholderImage : '${acrLoginServer}/${j.image}:${imageTag}'
+          command: usePlaceholderImages || !j.hasImage ? null : j.command
           resources: { cpu: json('0.5'), memory: '1Gi' }
           env: concat(j.env, [ { name: 'AZURE_CLIENT_ID', value: identities.pipeline.clientId } ])
         }
