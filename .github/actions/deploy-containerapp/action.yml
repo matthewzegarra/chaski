@@ -1,0 +1,99 @@
+name: Deploy to Azure Container Apps with smoke test and rollback
+description: >-
+  Updates a Container App to a new image, smoke-tests /health and /ready on its public FQDN
+  and, if the smoke test fails, redeploys the previous image and fails the job.
+  Requires a prior azure/login (OIDC).
+
+inputs:
+  resource-group:
+    description: Resource group of the Container App
+    required: true
+  app:
+    description: Container App name
+    required: true
+  image:
+    description: Full image reference (tag or digest) to deploy
+    required: true
+  revision-suffix:
+    description: Revision suffix (lowercase letters, digits and '-', starting with a letter)
+    required: true
+  environment:
+    description: Environment label for the summary (DEV/TEST/PROD)
+    required: true
+  smoke-timeout-seconds:
+    description: Total time allowed for the app to answer (scale-to-zero cold start)
+    required: false
+    default: "240"
+
+outputs:
+  url:
+    description: Public URL of the app
+    value: ${{ steps.deploy.outputs.url }}
+  previous-image:
+    description: Image that was running before this deploy
+    value: ${{ steps.deploy.outputs.previous-image }}
+
+runs:
+  using: composite
+  steps:
+    - id: deploy
+      shell: bash
+      env:
+        RG: ${{ inputs.resource-group }}
+        APP: ${{ inputs.app }}
+        IMAGE: ${{ inputs.image }}
+        SUFFIX: ${{ inputs.revision-suffix }}
+        ENV_LABEL: ${{ inputs.environment }}
+        SMOKE_TIMEOUT: ${{ inputs.smoke-timeout-seconds }}
+      run: |
+        set -euo pipefail
+
+        previous="$(az containerapp show -g "$RG" -n "$APP" --query 'properties.template.containers[0].image' -o tsv)"
+        fqdn="$(az containerapp show -g "$RG" -n "$APP" --query 'properties.configuration.ingress.fqdn' -o tsv)"
+        url="https://${fqdn}"
+        echo "previous-image=${previous}" >> "$GITHUB_OUTPUT"
+        echo "url=${url}" >> "$GITHUB_OUTPUT"
+        echo "Deploying ${IMAGE} to ${APP} (${ENV_LABEL}); previous image: ${previous}"
+
+        az containerapp update -g "$RG" -n "$APP" --image "$IMAGE" --revision-suffix "$SUFFIX" -o none
+
+        smoke() {
+          local deadline=$((SECONDS + SMOKE_TIMEOUT))
+          for path in /health /ready; do
+            until curl -fsS --max-time 10 "${url}${path}" >/dev/null; do
+              if (( SECONDS >= deadline )); then
+                echo "::error::Smoke test failed: ${url}${path} did not answer 200 within ${SMOKE_TIMEOUT}s"
+                if [[ "$path" == "/ready" ]]; then
+                  echo "::error::/ready checks the database. If /health works but /ready does not, the schema may be out of date: run the Alembic migrations job (tools image) and redeploy."
+                fi
+                return 1
+              fi
+              sleep 10
+            done
+            echo "OK ${path}"
+          done
+        }
+
+        if smoke; then
+          result="✅ Smoke test OK (/health y /ready)"
+          status=0
+        else
+          echo "::warning::Rolling back ${APP} to ${previous}"
+          az containerapp update -g "$RG" -n "$APP" --image "$previous" --revision-suffix "rb-${SUFFIX}" -o none
+          result="❌ Smoke test falló: se restauró la imagen anterior (${previous})"
+          status=1
+        fi
+
+        revision="$(az containerapp show -g "$RG" -n "$APP" --query 'properties.latestRevisionName' -o tsv)"
+        {
+          echo "## Deploy cuentas-api · ${ENV_LABEL}"
+          echo
+          echo "| Campo | Valor |"
+          echo "|---|---|"
+          echo "| Imagen | \`${IMAGE}\` |"
+          echo "| Imagen anterior | \`${previous}\` |"
+          echo "| Revisión activa | \`${revision}\` |"
+          echo "| URL | ${url} |"
+          echo "| Resultado | ${result} |"
+        } >> "$GITHUB_STEP_SUMMARY"
+        exit "$status"

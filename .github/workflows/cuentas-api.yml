@@ -1,6 +1,16 @@
 # CI/CD of cuentas-api, the critical CHASKI service.
 # The name and branches matter: the console's DevOps module infers the environment from them
-# (main -> PROD, release/* -> TEST, otherwise DEV). See docs/prompts/PROMPT_GITHUB_ACTIONS_CUENTAS_API.md.
+# (main -> PROD, release/* -> TEST, otherwise DEV). See docs/CICD.md.
+#
+#   PR to develop/release/main ........ lint + tests + build + scan (no credentials)
+#   push develop ...................... CI + push sha-<commit> to ACR + deploy DEV
+#   push release/** ................... CI + push sha-<commit> to ACR + deploy TEST
+#   push main ......................... CI (PROD is promoted manually, see deploy-prod)
+#   workflow_dispatch prod (on main) .. promote the image tested in TEST to PROD (no rebuild)
+#   workflow_dispatch dev/test ........ redeploy an existing image tag
+#
+# Without Azure configured (GitHub environment variables empty) the publish and deploy steps
+# are skipped with a notice and the run stays green.
 name: cuentas-api CI/CD
 
 on:
@@ -14,16 +24,28 @@ on:
       - "uv.lock"
       - "conftest.py"
       - ".github/workflows/cuentas-api.yml"
+      - ".github/actions/deploy-containerapp/**"
   push:
     branches: [develop, "release/**", main]
     paths: *service_paths
   workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to redeploy
+        type: choice
+        options: [dev, test, prod]
+        required: true
+      image_tag:
+        description: "Existing image tag in ACR (default: sha-<commit of this run>; prod defaults to the 'test' tag)"
+        type: string
+        required: false
 
 permissions:
   contents: read
 
 concurrency:
-  # One run per PR/branch; superseded PR runs are cancelled (deploys never are).
+  # One run per PR/branch; superseded PR runs are cancelled. Deploy jobs have their own
+  # per-environment lock and are never cancelled.
   group: cuentas-api-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -139,9 +161,17 @@ jobs:
         run: docker logs chaski-pg 2>&1 | tail -50
 
   image:
-    name: Build and scan image
+    name: Build, scan and publish image
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # Credentials only on push (the `build` environment holds the ACR/OIDC variables);
+    # pull requests build and scan without any Azure access (D59).
+    environment: ${{ github.event_name == 'push' && 'build' || '' }}
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      pushed: ${{ steps.push.outputs.pushed }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -156,7 +186,7 @@ jobs:
             org.opencontainers.image.title=chaski-cuentas-api
             org.opencontainers.image.description=Interbank CHASKI - cuentas-api
 
-      - name: Build (no push in CI)
+      - name: Build (loaded locally, pushed only after the scan)
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -197,3 +227,243 @@ jobs:
           path: trivy-cuentas-api.sarif
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Registry configured?
+        id: cfg
+        if: github.event_name == 'push'
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          ACR_NAME: ${{ vars.ACR_NAME }}
+        run: |
+          if [[ -n "$AZURE_CLIENT_ID" && -n "$AZURE_TENANT_ID" && -n "$AZURE_SUBSCRIPTION_ID" && -n "$ACR_NAME" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Publish skipped::Azure Container Registry is not configured yet (environment 'build'). See docs/CICD.md."
+            echo "### ⏭️ Publicación omitida: falta configurar ACR en el environment \`build\` (ver docs/CICD.md)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Azure login (OIDC)
+        if: steps.cfg.outputs.configured == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Push sha-<commit> to ACR (the exact image that was scanned)
+        id: push
+        if: steps.cfg.outputs.configured == 'true'
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+        run: |
+          az acr login --name "$ACR_NAME"
+          target="${ACR_NAME}.azurecr.io/${IMAGE_NAME}:sha-${GITHUB_SHA}"
+          docker tag "${IMAGE_NAME}:sha-${GITHUB_SHA}" "$target"
+          docker push "$target"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+          echo "### 📦 Imagen publicada: \`${target}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-dev:
+    name: Deploy DEV
+    needs: [lint, test, image]
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/develop')
+      || (github.event_name == 'workflow_dispatch' && inputs.environment == 'dev')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: dev
+      url: ${{ steps.deploy.outputs.url }}
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: cuentas-api-deploy-dev
+      cancel-in-progress: false
+    env:
+      IMAGE_TAG: ${{ inputs.image_tag || format('sha-{0}', github.sha) }}
+      ENV_TAG: dev
+    steps: &deploy_steps
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Environment configured?
+        id: cfg
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          ACR_NAME: ${{ vars.ACR_NAME }}
+          RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+          CONTAINERAPP_NAME: ${{ vars.CONTAINERAPP_NAME }}
+          IMAGE_PUSHED: ${{ needs.image.outputs.pushed }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          missing=()
+          for v in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID ACR_NAME RESOURCE_GROUP CONTAINERAPP_NAME; do
+            [[ -n "${!v}" ]] || missing+=("$v")
+          done
+          if (( ${#missing[@]} )); then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Deploy ${ENV_TAG} skipped::Missing environment variables: ${missing[*]}. See docs/CICD.md."
+            echo "### ⏭️ Deploy a ${ENV_TAG^^} omitido: faltan variables del environment (${missing[*]}). Ver docs/CICD.md" >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$EVENT" == "push" && "$IMAGE_PUSHED" != "true" ]]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Deploy ${ENV_TAG} skipped::The image was not published to ACR in this run."
+            echo "### ⏭️ Deploy a ${ENV_TAG^^} omitido: la imagen no se publicó en ACR en esta ejecución" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Azure login (OIDC)
+        if: steps.cfg.outputs.configured == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy, smoke test and rollback on failure
+        id: deploy
+        if: steps.cfg.outputs.configured == 'true'
+        uses: ./.github/actions/deploy-containerapp
+        with:
+          resource-group: ${{ vars.RESOURCE_GROUP }}
+          app: ${{ vars.CONTAINERAPP_NAME }}
+          image: ${{ vars.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          revision-suffix: r${{ github.run_number }}-${{ github.run_attempt }}
+          environment: ${{ env.ENV_TAG }}
+
+      - name: Move the environment tag in ACR
+        # The `test` tag is what PROD promotes; `dev`/`test`/`prod` also tell what runs where.
+        if: steps.cfg.outputs.configured == 'true'
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+        # imagetools only re-publishes the manifest: needs AcrPush, not importImage (D64).
+        run: |
+          az acr login --name "$ACR_NAME"
+          repo="${ACR_NAME}.azurecr.io/${IMAGE_NAME}"
+          docker buildx imagetools create --tag "${repo}:${ENV_TAG}" "${repo}:${IMAGE_TAG}"
+
+  deploy-test:
+    name: Deploy TEST
+    needs: [lint, test, image]
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/'))
+      || (github.event_name == 'workflow_dispatch' && inputs.environment == 'test')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: test
+      url: ${{ steps.deploy.outputs.url }}
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: cuentas-api-deploy-test
+      cancel-in-progress: false
+    env:
+      IMAGE_TAG: ${{ inputs.image_tag || format('sha-{0}', github.sha) }}
+      ENV_TAG: test
+    steps: *deploy_steps
+
+  deploy-prod:
+    name: Deploy PROD (promote the TEST image)
+    needs: [lint, test]
+    # GitHub Pro cannot require reviewers on environments of private repos (D60): PROD is a
+    # deliberate manual action (workflow_dispatch on main, actor recorded) unless the repo
+    # variable PROD_AUTO_DEPLOY is 'true' (e.g. after moving to a plan with required reviewers).
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.environment == 'prod' && github.ref == 'refs/heads/main')
+      || (github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PROD_AUTO_DEPLOY == 'true')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: prod
+      url: ${{ steps.deploy.outputs.url }}
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: cuentas-api-deploy-prod
+      cancel-in-progress: false
+    env:
+      SOURCE_TAG: ${{ inputs.image_tag || 'test' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # needed to verify the promoted commit belongs to main
+
+      - name: Environment configured?
+        id: cfg
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          ACR_NAME: ${{ vars.ACR_NAME }}
+          RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
+          CONTAINERAPP_NAME: ${{ vars.CONTAINERAPP_NAME }}
+        run: |
+          missing=()
+          for v in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID ACR_NAME RESOURCE_GROUP CONTAINERAPP_NAME; do
+            [[ -n "${!v}" ]] || missing+=("$v")
+          done
+          if (( ${#missing[@]} )); then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Deploy prod skipped::Missing environment variables: ${missing[*]}. See docs/CICD.md."
+            echo "### ⏭️ Deploy a PROD omitido: faltan variables del environment (${missing[*]}). Ver docs/CICD.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Azure login (OIDC)
+        if: steps.cfg.outputs.configured == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve the image tested in TEST (by digest) and check it comes from main
+        id: promote
+        if: steps.cfg.outputs.configured == 'true'
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+        run: |
+          set -euo pipefail
+          az acr login --name "$ACR_NAME"
+          ref="${ACR_NAME}.azurecr.io/${IMAGE_NAME}:${SOURCE_TAG}"
+          digest="$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' | jq -r '.digest')"
+          revision="$(docker buildx imagetools inspect "$ref" --format '{{json .Image}}' \
+            | jq -r '.config.Labels["org.opencontainers.image.revision"] // empty')"
+          if [[ -z "$revision" ]]; then
+            echo "::error::${ref} has no org.opencontainers.image.revision label: refusing to promote"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$revision" "$GITHUB_SHA"; then
+            echo "::error::The TEST image was built from ${revision}, which is not part of main (${GITHUB_SHA}). Merge the release into main first."
+            exit 1
+          fi
+          echo "image=${ACR_NAME}.azurecr.io/${IMAGE_NAME}@${digest}" >> "$GITHUB_OUTPUT"
+          echo "revision=${revision}" >> "$GITHUB_OUTPUT"
+          echo "Promoting ${ref} (${digest}, commit ${revision}) to PROD"
+
+      - name: Deploy, smoke test and rollback on failure
+        id: deploy
+        if: steps.cfg.outputs.configured == 'true'
+        uses: ./.github/actions/deploy-containerapp
+        with:
+          resource-group: ${{ vars.RESOURCE_GROUP }}
+          app: ${{ vars.CONTAINERAPP_NAME }}
+          image: ${{ steps.promote.outputs.image }}
+          revision-suffix: r${{ github.run_number }}-${{ github.run_attempt }}
+          environment: prod
+
+      - name: Tag the promoted image as prod
+        if: steps.cfg.outputs.configured == 'true'
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+          IMAGE: ${{ steps.promote.outputs.image }}
+        run: docker buildx imagetools create --tag "${ACR_NAME}.azurecr.io/${IMAGE_NAME}:prod" "$IMAGE"
