@@ -19,7 +19,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --package core-api --no-editable
 
 FROM python:3.12-slim AS runtime
-RUN useradd --system --uid 10001 --no-create-home chaski
+RUN useradd --system --uid 10001 --no-create-home chaski \
+    && mkdir -p /data/uploads && chown chaski:chaski /data/uploads
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
     SERVICE_NAME=core-api

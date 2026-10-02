@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from functools import lru_cache
+from zoneinfo import ZoneInfo
+
+LIMA = ZoneInfo("America/Lima")
 
 # (month, day) fixed national holidays.
 _FIXED_HOLIDAYS = {
@@ -74,3 +77,12 @@ def business_days_between(start: date, end: date) -> int:
         if is_business_day(current):
             count += 1
     return count
+
+
+def regulatory_deadline(start: datetime, days: int) -> datetime:
+    """End (23:59:59 Lima) of the `days`-th business day after `start`, counted on Lima's
+    calendar. A complaint filed at 23:50 Lima on Thursday must not start counting on Friday
+    just because it is already Friday in UTC."""
+    local_day = start.astimezone(LIMA).date()
+    due = add_business_days(local_day, days)
+    return datetime.combine(due, time(23, 59, 59), LIMA)

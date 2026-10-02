@@ -117,3 +117,15 @@ def test_security_headers_and_correlation_id(client: TestClient) -> None:
     assert resp.headers["X-Correlation-ID"] == "abc12345-test"
     assert resp.headers["X-Content-Type-Options"] == "nosniff"
     assert resp.headers["X-Frame-Options"] == "DENY"
+
+
+@router.get("/boom")
+def boom() -> None:
+    raise RuntimeError("unexpected")
+
+
+def test_unhandled_errors_keep_cors_headers(client: TestClient) -> None:
+    resp = client.get("/api/v1/boom", headers={"Origin": "http://localhost:3000"})
+    assert resp.status_code == 500
+    assert resp.json()["detail"] == "Error interno"
+    assert resp.headers["access-control-allow-origin"] == "http://localhost:3000"

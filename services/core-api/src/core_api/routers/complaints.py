@@ -10,7 +10,7 @@ from typing import Literal
 
 from chaski_common import audit
 from chaski_common.auth import CurrentUser, client_ip, require_customer, require_roles
-from chaski_common.business_days import add_business_days, business_days_between
+from chaski_common.business_days import LIMA, business_days_between, regulatory_deadline
 from chaski_common.db import get_db
 from chaski_common.models import AiInteraction, Complaint, Customer, as_dict
 from chaski_common.roles import Role
@@ -94,7 +94,9 @@ def console_view(c: Complaint, customer: Customer) -> ComplaintConsoleOut:
     return ComplaintConsoleOut(
         **as_dict(c),
         customer_name=f"{customer.first_name} {customer.last_name}",
-        business_days_left=business_days_between(datetime.now(UTC).date(), c.due_at.date()),
+        business_days_left=business_days_between(
+            datetime.now(LIMA).date(), c.due_at.astimezone(LIMA).date()
+        ),
     )
 
 
@@ -126,7 +128,7 @@ def create_complaint(
         ai_suspicious=suspicious,
         requires_review=needs_human_review(category, confidence, suspicious),
         created_at=now,
-        due_at=add_business_days(now, RESPONSE_DAYS),
+        due_at=regulatory_deadline(now, RESPONSE_DAYS),
     )
     db.add(complaint)
     db.commit()

@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from chaski_common.business_days import add_business_days
+from chaski_common.business_days import regulatory_deadline
 from chaski_common.models import AiInteraction, Complaint
 from chaski_common.roles import Role
 from chaski_common.testing import customer_headers, headers, make_customer
@@ -44,7 +44,7 @@ def test_ia_down_goes_to_human_review_with_due_date(client: TestClient, s: Sessi
     assert resp.status_code == 201
     complaint = s.scalars(select(Complaint)).one()
     assert complaint.requires_review and complaint.ai_category is None
-    assert complaint.due_at == add_business_days(complaint.created_at, 15)
+    assert complaint.due_at == regulatory_deadline(complaint.created_at, 15)
 
 
 def test_confident_classification_skips_review(

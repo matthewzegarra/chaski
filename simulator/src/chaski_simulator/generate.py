@@ -15,7 +15,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
-from chaski_common.business_days import add_business_days
+from chaski_common.business_days import regulatory_deadline
 from faker import Faker
 
 from chaski_simulator import catalog as cat
@@ -651,7 +651,7 @@ class Generator:
                     if resolved
                     else None,
                     "created_at": created,
-                    "due_at": add_business_days(created, 15),
+                    "due_at": regulatory_deadline(created, 15),
                 }
             )
             self.ds.ai_interactions.append(

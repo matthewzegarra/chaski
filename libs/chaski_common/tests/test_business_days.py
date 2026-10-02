@@ -3,10 +3,12 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 
 from chaski_common.business_days import (
+    LIMA,
     add_business_days,
     business_days_between,
     holidays,
     is_business_day,
+    regulatory_deadline,
 )
 
 
@@ -36,3 +38,11 @@ def test_add_business_days_keeps_time() -> None:
 def test_business_days_between() -> None:
     assert business_days_between(date(2026, 10, 2), date(2026, 10, 5)) == 1
     assert business_days_between(date(2026, 10, 5), date(2026, 10, 2)) == -1
+
+
+def test_regulatory_deadline_uses_lima_calendar() -> None:
+    # Thu 2026-10-01 23:50 Lima is already Fri 04:50 UTC; counting starts from Thursday.
+    filed = datetime(2026, 10, 2, 4, 50, tzinfo=UTC)
+    due = regulatory_deadline(filed, 15)
+    assert due.astimezone(LIMA).date() == date(2026, 10, 23)  # a Friday, never a weekend
+    assert (due.hour, due.minute) == (23, 59)

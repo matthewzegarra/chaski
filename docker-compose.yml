@@ -141,6 +141,24 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  cliente:
+    build:
+      context: .
+      dockerfile: apps/cliente/Dockerfile
+    image: chaski/cliente:local
+    environment: &web-env
+      CHASKI_AUTH_MODE: ${AUTH_MODE:-dev}
+      CHASKI_ENV: ${CHASKI_ENV:-DEV}
+      CHASKI_CUENTAS_API_URL: ${CHASKI_CUENTAS_API_URL:-http://localhost:8001}
+      CHASKI_CORE_API_URL: ${CHASKI_CORE_API_URL:-http://localhost:8002}
+      CHASKI_IA_API_URL: ${CHASKI_IA_API_URL:-http://localhost:8003}
+      CHASKI_ENTRA_CLIENT_ID: ${ENTRA_SPA_CLIENT_ID:-}
+      CHASKI_ENTRA_TENANT_ID: ${ENTRA_TENANT_ID:-}
+      CHASKI_ENTRA_API_SCOPE: ${ENTRA_API_SCOPE:-}
+      CHASKI_POWERBI_EMBED_URL: ${CHASKI_POWERBI_EMBED_URL:-}
+    ports:
+      - "3000:8080"
+
 volumes:
   pgdata:
   uploads:

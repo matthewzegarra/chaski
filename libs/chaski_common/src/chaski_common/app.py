@@ -14,6 +14,7 @@ from chaski_common.middleware import (
     CorrelationIdMiddleware,
     RateLimitMiddleware,
     SecurityHeadersMiddleware,
+    UnhandledErrorMiddleware,
 )
 from chaski_common.settings import get_common_settings
 from chaski_common.telemetry import configure_telemetry
@@ -35,7 +36,9 @@ def create_app(
 
     app = FastAPI(title=title, description=description, version=settings.service_version)
 
-    # Starlette runs the last-added middleware first, so CorrelationId wraps everything.
+    # Starlette runs the last-added middleware first, so CorrelationId wraps everything and
+    # UnhandledError is innermost (its 500s still get CORS and security headers).
+    app.add_middleware(UnhandledErrorMiddleware)
     app.add_middleware(RateLimitMiddleware, per_minute=settings.rate_limit_per_minute)
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(

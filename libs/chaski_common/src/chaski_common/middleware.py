@@ -87,3 +87,18 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 headers={"Retry-After": "60"},
             )
         return await call_next(request)
+
+
+class UnhandledErrorMiddleware(BaseHTTPMiddleware):
+    """Turns unexpected exceptions into a JSON 500 *inside* the CORS middleware, so browsers
+    receive the CORS headers and can show the message (and the correlation id)."""
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        try:
+            return await call_next(request)
+        except Exception as exc:
+            get_logger("chaski.errors").exception("unhandled_error", error_type=type(exc).__name__)
+            return JSONResponse(
+                {"detail": "Error interno", "correlation_id": correlation_id_var.get()},
+                status_code=500,
+            )
