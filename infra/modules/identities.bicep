@@ -4,6 +4,8 @@ param location string
 param tags object
 param prefix string
 param githubRepo string
+@description('OIDC subject prefix. Repos with immutable-ID subjects use repo:<owner>@<ownerId>/<repo>@<repoId>.')
+param githubSubjectPrefix string = 'repo:${githubRepo}'
 param githubEnvironments array = [ 'build', 'dev', 'test', 'prod' ]
 
 var workloads = [ 'cuentas', 'core', 'ia', 'web', 'pipeline' ]
@@ -27,7 +29,7 @@ resource fic 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentity
   name: 'gh-${e}'
   properties: {
     issuer: 'https://token.actions.githubusercontent.com'
-    subject: 'repo:${githubRepo}:environment:${e}'
+    subject: '${githubSubjectPrefix}:environment:${e}'
     audiences: [ 'api://AzureADTokenExchange' ]
   }
 }]
