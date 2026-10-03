@@ -224,11 +224,20 @@ resource webApps 'Microsoft.App/containerApps@2024-03-01' = [for w in webs: {
   }
 }]
 
-// Jobs: database migrations + seed (manual) and the data pipeline (manual for now;
-// the nightly cron is added with the data phase).
+var pipelineEnv = [
+  { name: 'DATABASE_URL', secretRef: 'database-url' }
+  { name: 'BLOB_ACCOUNT_URL', value: blobEndpoint }
+  { name: 'AUTH_MODE', value: 'entra' }
+  { name: 'ENTRA_TENANT_ID', value: entra.tenantId }
+  { name: 'ENTRA_AUDIENCE', value: entra.audience }
+  { name: 'LOG_LEVEL', value: 'INFO' }
+]
+
+// Jobs: database migrations + seed (manual) and the ingestion pipeline, both on demand
+// (console button) and nightly. The pipeline runs from the core-api image.
 var jobs = [
   {
-    name: 'caj-migrate', image: 'chaski/tools', hasImage: true
+    name: 'caj-migrate', image: 'chaski/tools', hasImage: true, schedule: ''
     // Roles first (no init hook in managed PostgreSQL), then schema, then synthetic data.
     command: [ 'sh', '-c', 'python db/bootstrap_roles.py && alembic -c db/alembic.ini upgrade head && python -m chaski_simulator --reset' ]
     kvSecrets: [ 'migrations-database-url', 'pg-app-password', 'pg-readonly-password' ]
@@ -239,14 +248,18 @@ var jobs = [
     ]
   }
   {
-    // The pipeline image arrives with the data phase; until then it keeps the sample image.
-    name: 'caj-pipeline', image: 'chaski/pipeline', hasImage: false
-    command: []
+    // Ingestion flow (quality checks + quarantine), started from the console button.
+    name: 'caj-pipeline', image: 'chaski/core-api', hasImage: true, schedule: ''
+    command: [ 'python', '-m', 'core_api.pipeline_job' ]
     kvSecrets: [ 'database-url' ]
-    env: [
-      { name: 'DATABASE_URL', secretRef: 'database-url' }
-      { name: 'BLOB_ACCOUNT_URL', value: blobEndpoint }
-    ]
+    env: concat(pipelineEnv, [ { name: 'PIPELINE_TRIGGER', value: 'MANUAL' } ])
+  }
+  {
+    // Same flow every night at 01:00 Lima (06:00 UTC).
+    name: 'caj-pipeline-nightly', image: 'chaski/core-api', hasImage: true, schedule: '0 6 * * *'
+    command: [ 'python', '-m', 'core_api.pipeline_job' ]
+    kvSecrets: [ 'database-url' ]
+    env: concat(pipelineEnv, [ { name: 'PIPELINE_TRIGGER', value: 'PROGRAMADO' } ])
   }
 ]
 
@@ -262,10 +275,11 @@ resource jobRes 'Microsoft.App/jobs@2024-03-01' = [for j in jobs: {
     environmentId: cae.id
     workloadProfileName: 'Consumption'
     configuration: {
-      triggerType: 'Manual'
+      triggerType: empty(j.schedule) ? 'Manual' : 'Schedule'
       replicaTimeout: 1800
       replicaRetryLimit: 0
-      manualTriggerConfig: { parallelism: 1, replicaCompletionCount: 1 }
+      manualTriggerConfig: empty(j.schedule) ? { parallelism: 1, replicaCompletionCount: 1 } : null
+      scheduleTriggerConfig: empty(j.schedule) ? null : { cronExpression: j.schedule, parallelism: 1, replicaCompletionCount: 1 }
       registries: [ { server: acrLoginServer, identity: identities.pipeline.id } ]
       secrets: map(j.kvSecrets, s => kvSecret(s, keyVaultUri, identities.pipeline.id))
     }

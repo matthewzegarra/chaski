@@ -162,6 +162,8 @@ jobs:
 
   image:
     name: Build, scan and publish image
+    # PROD promotes the image already tested in TEST: nothing to build.
+    if: github.event_name != 'workflow_dispatch' || inputs.environment != 'prod'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     # Credentials only on push (the `build` environment holds the ACR/OIDC variables);
@@ -170,11 +172,19 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      packages: read
     outputs:
       pushed: ${{ steps.push.outputs.pushed }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to ghcr.io (authenticated base-image pulls; anonymous ones get 429)
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Image metadata
         id: meta
