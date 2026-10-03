@@ -23,6 +23,8 @@ param openAi object
 param githubRepo string
 @description('API Management gateway URL; when set, the web apps call the APIs only through it.')
 param apiGatewayUrl string = ''
+@description('Read-only GitHub token (Key Vault secret github-readonly-token) for the console DevOps module. Enable only once the secret exists.')
+param enableGithubToken bool = false
 @description('Azure SQL data warehouse loaded by the pipeline jobs.')
 param dw object = { server: '', database: '' }
 
@@ -95,8 +97,8 @@ var apis = [
   }
   {
     name: 'ca-core', image: 'chaski/core-api', tag: imageTag, id: 'core', chaskiEnv: 'DEV'
-    kvSecrets: [ 'database-url', 'analytics-db-url', 'fraud-webhook-secret', 'chaski-services-cert' ]
-    env: [
+    kvSecrets: concat([ 'database-url', 'analytics-db-url', 'fraud-webhook-secret', 'chaski-services-cert' ], enableGithubToken ? [ 'github-readonly-token' ] : [])
+    env: concat([
       { name: 'SERVICE_NAME', value: 'core-api' }
       { name: 'ANALYTICS_DB_URL', secretRef: 'analytics-db-url' }
       { name: 'ANALYTICS_DIALECT', value: 'postgres' }
@@ -110,7 +112,7 @@ var apis = [
       { name: 'GITHUB_REPO', value: githubRepo }
       { name: 'ENTRA_SERVICE_CLIENT_ID', value: entra.servicesClientId }
       { name: 'ENTRA_SERVICE_CERTIFICATE', secretRef: 'chaski-services-cert' }
-    ]
+    ], enableGithubToken ? [ { name: 'GITHUB_TOKEN', secretRef: 'github-readonly-token' } ] : [])
   }
   {
     name: 'ca-ia', image: 'chaski/ia-api', tag: imageTag, id: 'ia', chaskiEnv: 'DEV'

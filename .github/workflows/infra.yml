@@ -82,10 +82,11 @@ jobs:
           ADMIN_IP: ${{ vars.INFRA_ADMIN_IP }}
           ADMIN_OID: ${{ vars.INFRA_ADMIN_OBJECT_ID }}
           ADMIN_UPN: ${{ vars.INFRA_ADMIN_UPN }}
+          GH_TOKEN_ENABLED: ${{ vars.ENABLE_GITHUB_TOKEN == 'true' }}
         run: |
           # shellcheck disable=SC2086
           az deployment sub what-if --name "chaski-ci-${GITHUB_RUN_NUMBER}" $DEPLOY_ARGS \
-            --parameters deployerIp="$ADMIN_IP" deployerObjectId="$ADMIN_OID" deployerUpn="$ADMIN_UPN" \
+            --parameters deployerIp="$ADMIN_IP" deployerObjectId="$ADMIN_OID" deployerUpn="$ADMIN_UPN" enableGithubToken="$GH_TOKEN_ENABLED" \
             --result-format ResourceIdOnly --no-pretty-print > whatif.txt || { cat whatif.txt; exit 1; }
           {
             echo "## What-if de la infraestructura"
@@ -100,9 +101,10 @@ jobs:
           ADMIN_IP: ${{ vars.INFRA_ADMIN_IP }}
           ADMIN_OID: ${{ vars.INFRA_ADMIN_OBJECT_ID }}
           ADMIN_UPN: ${{ vars.INFRA_ADMIN_UPN }}
+          GH_TOKEN_ENABLED: ${{ vars.ENABLE_GITHUB_TOKEN == 'true' }}
         run: |
           # shellcheck disable=SC2086
           az deployment sub create --name "chaski-ci-${GITHUB_RUN_NUMBER}" $DEPLOY_ARGS \
-            --parameters deployerIp="$ADMIN_IP" deployerObjectId="$ADMIN_OID" deployerUpn="$ADMIN_UPN" \
+            --parameters deployerIp="$ADMIN_IP" deployerObjectId="$ADMIN_OID" deployerUpn="$ADMIN_UPN" enableGithubToken="$GH_TOKEN_ENABLED" \
             --query "properties.provisioningState" -o tsv
           echo "### ✅ Infraestructura aplicada (deployment chaski-ci-${GITHUB_RUN_NUMBER})" >> "$GITHUB_STEP_SUMMARY"
