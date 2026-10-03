@@ -45,7 +45,10 @@ def test_onboarding_without_ia_creates_pending_customer(
     customer = s.get(Customer, body["customer_id"])
     assert customer is not None and customer.document_number == "45678912"
     doc = s.scalars(select(KycDocument)).one()
-    assert doc.extracted_json is None and doc.blob_path.startswith("file://kyc/")
+    assert doc.blob_path.startswith("file://kyc/")
+    assert doc.extracted_json is not None
+    assert doc.extracted_json["consulta_fuente"] == "MOCK"
+    assert "nombres" not in doc.extracted_json  # OCR unavailable; only the lookup snapshot
     assert ia["calls"][0][0] == "/kyc/extract"
 
 
@@ -78,10 +81,17 @@ def test_onboarding_with_ia_extraction_compares_fields(
     }
     body = _start(client).json()
     assert body["confidence"] == 0.94
+    assert body["lookup"] == {
+        "nombres": "Rosa",
+        "apellidos": "Mamani Quispe",
+        "fuente": "MOCK",
+    }
     assert body["checks"] == {
         "dni_coincide": True,
         "nombres_coinciden": True,
         "fecha_nacimiento_coincide": True,
+        "consulta_nombres_coinciden": True,
+        "consulta_ocr_coinciden": True,
     }
 
 
@@ -115,7 +125,9 @@ def test_pending_inbox_is_masked_and_decision_opens_products(
     item = inbox[0]
     assert item["customer"]["document_number"] == "****8912"
     assert item["extracted"]["numero_documento"] == "****8913"
+    assert item["lookup"]["fuente"] == "MOCK"
     assert item["checks"]["dni_coincide"] is False  # flagged for the analyst
+    assert item["checks"]["consulta_nombres_coinciden"] is True
 
     resp = client.post(
         f"/api/v1/onboarding/{customer_id}/decision", json={"decision": "APROBADO"}, headers=h

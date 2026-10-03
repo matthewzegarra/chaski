@@ -25,6 +25,8 @@ param githubRepo string
 param apiGatewayUrl string = ''
 @description('Read-only GitHub token (Key Vault secret github-readonly-token) for the console DevOps module. Enable only once the secret exists.')
 param enableGithubToken bool = false
+@description('ApisPeru DNI token (Key Vault secret dni-lookup-token). Enable only once the secret exists.')
+param enableDniLookup bool = false
 @description('Azure SQL data warehouse loaded by the pipeline jobs.')
 param dw object = { server: '', database: '' }
 
@@ -97,7 +99,7 @@ var apis = [
   }
   {
     name: 'ca-core', image: 'chaski/core-api', tag: imageTag, id: 'core', chaskiEnv: 'DEV'
-    kvSecrets: concat([ 'database-url', 'analytics-db-url', 'fraud-webhook-secret', 'chaski-services-cert' ], enableGithubToken ? [ 'github-readonly-token' ] : [])
+    kvSecrets: concat([ 'database-url', 'analytics-db-url', 'fraud-webhook-secret', 'chaski-services-cert' ], enableGithubToken ? [ 'github-readonly-token' ] : [], enableDniLookup ? [ 'dni-lookup-token' ] : [])
     env: concat([
       { name: 'SERVICE_NAME', value: 'core-api' }
       { name: 'ANALYTICS_DB_URL', secretRef: 'analytics-db-url' }
@@ -112,7 +114,9 @@ var apis = [
       { name: 'GITHUB_REPO', value: githubRepo }
       { name: 'ENTRA_SERVICE_CLIENT_ID', value: entra.servicesClientId }
       { name: 'ENTRA_SERVICE_CERTIFICATE', secretRef: 'chaski-services-cert' }
-    ], enableGithubToken ? [ { name: 'GITHUB_TOKEN', secretRef: 'github-readonly-token' } ] : [])
+      { name: 'DNI_LOOKUP_MODE', value: 'auto' }
+      { name: 'DNI_LOOKUP_BASE_URL', value: 'https://dniruc.apisperu.com/api/v1' }
+    ], enableGithubToken ? [ { name: 'GITHUB_TOKEN', secretRef: 'github-readonly-token' } ] : [], enableDniLookup ? [ { name: 'DNI_LOOKUP_TOKEN', secretRef: 'dni-lookup-token' } ] : [])
   }
   {
     name: 'ca-ia', image: 'chaski/ia-api', tag: imageTag, id: 'ia', chaskiEnv: 'DEV'

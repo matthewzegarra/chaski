@@ -20,7 +20,7 @@ from pydantic import BaseModel, EmailStr, Field, TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from core_api import ia_client, storage
+from core_api import dni_lookup, ia_client, storage
 from core_api.routers.customers import CustomerMasked, masked
 from core_api.services.issuance import open_starter_products
 
@@ -37,10 +37,19 @@ EXT = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
 _email = TypeAdapter(EmailStr)
 
 
+class LookupOut(BaseModel):
+    found: bool
+    available: bool
+    nombres: str | None = None
+    apellidos: str | None = None
+    fuente: str | None = None
+
+
 class OnboardingOut(BaseModel):
     customer_id: uuid.UUID
     kyc_status: str
     extracted: dict[str, Any] | None
+    lookup: dict[str, Any] | None
     confidence: float | None
     checks: dict[str, bool | None]
     message: str
@@ -50,6 +59,7 @@ class PendingOut(BaseModel):
     customer: CustomerMasked
     document_id: uuid.UUID | None
     extracted: dict[str, Any] | None
+    lookup: dict[str, Any] | None
     confidence: float | None
     checks: dict[str, bool | None]
 
@@ -64,25 +74,71 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().upper()
 
 
-def compare(customer: Customer, extracted: dict[str, Any] | None) -> dict[str, bool | None]:
-    """Typed data vs data read from the DNI (None = could not be read)."""
-    if not extracted:
-        return {"dni_coincide": None, "nombres_coinciden": None, "fecha_nacimiento_coincide": None}
-    names = extracted.get("nombres")
-    surnames = extracted.get("apellidos")
-    birth = extracted.get("fecha_nacimiento")
+CONSULTA_KEYS = ("consulta_nombres", "consulta_apellidos", "consulta_fuente")
+
+
+def split_stored(
+    stored: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """OCR fields vs the ApisPeru/mock snapshot persisted inside extracted_json."""
+    if not stored:
+        return None, None
+    lookup = None
+    if stored.get("consulta_fuente"):
+        lookup = {
+            "nombres": stored.get("consulta_nombres"),
+            "apellidos": stored.get("consulta_apellidos"),
+            "fuente": stored.get("consulta_fuente"),
+        }
+    extracted = {k: v for k, v in stored.items() if k not in CONSULTA_KEYS}
+    return (extracted or None), lookup
+
+
+def merge_lookup(
+    extracted: dict[str, Any] | None, lookup: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    stored = dict(extracted or {})
+    if lookup:
+        stored["consulta_nombres"] = lookup.get("nombres")
+        stored["consulta_apellidos"] = lookup.get("apellidos")
+        stored["consulta_fuente"] = lookup.get("fuente")
+    return stored or None
+
+
+def public_lookup(lookup: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not lookup:
+        return None
+    return {k: lookup[k] for k in ("nombres", "apellidos", "fuente") if lookup.get(k) is not None}
+
+
+def compare(
+    customer: Customer,
+    extracted: dict[str, Any] | None,
+    lookup: dict[str, Any] | None = None,
+) -> dict[str, bool | None]:
+    """Typed data vs OCR vs identity lookup (None = that source could not be read)."""
+    names = extracted.get("nombres") if extracted else None
+    surnames = extracted.get("apellidos") if extracted else None
+    birth = extracted.get("fecha_nacimiento") if extracted else None
+    typed = _norm(f"{customer.first_name} {customer.last_name}")
+    ocr_names = _norm(f"{names} {surnames}") if names and surnames else None
+    lookup_names = None
+    if lookup and lookup.get("nombres") and lookup.get("apellidos"):
+        lookup_names = _norm(f"{lookup['nombres']} {lookup['apellidos']}")
     return {
         "dni_coincide": extracted.get("numero_documento") == customer.document_number
-        if extracted.get("numero_documento")
+        if extracted and extracted.get("numero_documento")
         else None,
-        "nombres_coinciden": (
-            _norm(f"{names} {surnames}") == _norm(f"{customer.first_name} {customer.last_name}")
-        )
-        if names and surnames
-        else None,
+        "nombres_coinciden": (ocr_names == typed) if ocr_names else None,
         "fecha_nacimiento_coincide": (
-            birth == customer.birth_date.isoformat() if birth and customer.birth_date else None
+            birth == customer.birth_date.isoformat()
+            if extracted and birth and customer.birth_date
+            else None
         ),
+        "consulta_nombres_coinciden": (lookup_names == typed) if lookup_names else None,
+        "consulta_ocr_coinciden": (lookup_names == ocr_names)
+        if lookup_names and ocr_names
+        else None,
     }
 
 
@@ -95,6 +151,13 @@ def masked_extraction(extracted: dict[str, Any] | None) -> dict[str, Any] | None
     return out
 
 
+def _snapshot_lookup(document_number: str) -> dict[str, Any] | None:
+    result = dni_lookup.lookup(document_number)
+    if not result.person:
+        return None
+    return dni_lookup.person_as_dict(result.person)
+
+
 async def _read_image(upload: UploadFile) -> tuple[bytes, str]:
     content_type = (upload.content_type or "").lower()
     if content_type not in IMAGE_SIGNATURES:
@@ -105,6 +168,27 @@ async def _read_image(upload: UploadFile) -> tuple[bytes, str]:
     if not data.startswith(IMAGE_SIGNATURES[content_type]):
         raise HTTPException(422, "El archivo no es una imagen válida")
     return data, content_type
+
+
+@router.get("/lookup-dni/{dni}", response_model=LookupOut)
+async def lookup_dni(dni: str, request: Request) -> LookupOut:
+    """Public autofill. Rate-limited; the provider token never reaches the browser."""
+    if not re.fullmatch(r"\d{8}", dni):
+        raise HTTPException(422, "El DNI tiene 8 dígitos")
+    if not dni_lookup.allow_lookup(client_ip(request) or "unknown"):
+        raise HTTPException(429, "Demasiadas consultas de DNI. Espera un minuto.")
+    result = dni_lookup.lookup(dni)
+    if not result.available:
+        return LookupOut(found=False, available=False)
+    if not result.found or result.person is None:
+        return LookupOut(found=False, available=True, fuente=result.fuente)
+    return LookupOut(
+        found=True,
+        available=True,
+        nombres=result.person.nombres,
+        apellidos=result.person.apellidos,
+        fuente=result.person.fuente,
+    )
 
 
 @router.post("", response_model=OnboardingOut, status_code=201)
@@ -172,12 +256,13 @@ async def start_onboarding(
     )
     extracted = result.get("datos") if result else None
     confidence = result.get("confianza") if result else None
+    lookup = _snapshot_lookup(document_number)
     db.add(
         KycDocument(
             id=doc_id,
             customer_id=customer.id,
             blob_path=blob_path,
-            extracted_json=extracted,
+            extracted_json=merge_lookup(extracted, lookup),
             extraction_confidence=Decimal(str(confidence)) if confidence is not None else None,
         )
     )
@@ -186,8 +271,9 @@ async def start_onboarding(
         customer_id=customer.id,
         kyc_status=customer.kyc_status,
         extracted=extracted,
+        lookup=public_lookup(lookup),
         confidence=confidence,
-        checks=compare(customer, extracted),
+        checks=compare(customer, extracted, lookup),
         message="Tu solicitud está en revisión. Te avisaremos cuando se apruebe.",
     )
 
@@ -207,16 +293,18 @@ def pending(
             .where(KycDocument.customer_id == c.id)
             .order_by(KycDocument.created_at.desc())
         ).first()
-        extracted = doc.extracted_json if doc else None
+        stored = doc.extracted_json if doc else None
+        extracted, lookup = split_stored(stored)
         out.append(
             PendingOut(
                 customer=masked(c),
                 document_id=doc.id if doc else None,
                 extracted=masked_extraction(extracted),
+                lookup=public_lookup(lookup),
                 confidence=float(doc.extraction_confidence)
                 if doc and doc.extraction_confidence
                 else None,
-                checks=compare(c, extracted),
+                checks=compare(c, extracted, lookup),
             )
         )
     return out

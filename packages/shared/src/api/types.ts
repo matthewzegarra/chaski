@@ -107,10 +107,19 @@ export interface ComplaintCustomer {
   due_at: string
 }
 
+export interface DniLookup {
+  found: boolean
+  available: boolean
+  nombres: string | null
+  apellidos: string | null
+  fuente: string | null
+}
+
 export interface OnboardingResult {
   customer_id: string
   kyc_status: string
   extracted: Record<string, string> | null
+  lookup: Record<string, string> | null
   confidence: number | null
   checks: Record<string, boolean | null>
   message: string
