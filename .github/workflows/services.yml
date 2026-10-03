@@ -1,0 +1,343 @@
+# CI/CD of the other CHASKI images: core-api, ia-api and the two web apps (cliente, consola).
+# cuentas-api, the critical service, keeps its own dev -> test -> prod pipeline
+# (cuentas-api.yml); these services have a single DEV environment in Azure.
+#
+#   PR to develop/release/main ... checks + build + scan of the changed services (no credentials)
+#   push develop ................. checks + push sha-<commit> to ACR + deploy DEV + move :dev tag
+#   push release/** or main ...... checks + push sha-<commit> to ACR (the image is ready to promote)
+#   workflow_dispatch ............ rebuild one service or all of them
+#
+# Only the services touched by the change are built (job `changes`).
+name: services CI/CD
+
+on:
+  pull_request:
+    branches: [develop, "release/**", main]
+    paths: &service_paths
+      - "services/core-api/**"
+      - "services/ia-api/**"
+      - "libs/chaski_common/**"
+      - "genai/prompts/**"
+      - "apps/**"
+      - "packages/shared/**"
+      - "docker/web/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "tsconfig.base.json"
+      - ".github/workflows/services.yml"
+      - ".github/actions/deploy-containerapp/**"
+  push:
+    branches: [develop, "release/**", main]
+    paths: *service_paths
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Service to rebuild
+        type: choice
+        options: [all, core-api, ia-api, cliente, consola]
+        default: all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: services-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  UV_VERSION: "0.11.x"
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
+  PNPM_VERSION: "12.3.4"
+
+jobs:
+  changes:
+    name: Detect changed services
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.detect.outputs.matrix }}
+      python: ${{ steps.detect.outputs.python }}
+      web: ${{ steps.detect.outputs.web }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Select services
+        id: detect
+        env:
+          EVENT: ${{ github.event_name }}
+          SELECTED: ${{ inputs.service }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          python3 - <<'EOF'
+          import json, os, re, subprocess
+
+          SERVICES = {
+              "core-api": {"dockerfile": "services/core-api/Dockerfile", "app": "ca-core", "kind": "python",
+                           "smoke": "/health /ready", "paths": [r"^services/core-api/"]},
+              "ia-api":   {"dockerfile": "services/ia-api/Dockerfile", "app": "ca-ia", "kind": "python",
+                           "smoke": "/health /ready", "paths": [r"^services/ia-api/", r"^genai/prompts/"]},
+              "cliente":  {"dockerfile": "apps/cliente/Dockerfile", "app": "ca-cliente", "kind": "web",
+                           "smoke": "/ /env.js", "paths": [r"^apps/cliente/"]},
+              "consola":  {"dockerfile": "apps/consola/Dockerfile", "app": "ca-consola", "kind": "web",
+                           "smoke": "/ /env.js", "paths": [r"^apps/consola/"]},
+          }
+          SHARED = {
+              "python": [r"^libs/chaski_common/", r"^pyproject\.toml$", r"^uv\.lock$"],
+              "web": [r"^packages/shared/", r"^docker/web/", r"^package\.json$", r"^pnpm-lock\.yaml$",
+                      r"^pnpm-workspace\.yaml$", r"^tsconfig\.base\.json$"],
+          }
+          ALL = [r"^\.github/workflows/services\.yml$", r"^\.github/actions/deploy-containerapp/"]
+
+          event, selected, base = os.environ["EVENT"], os.environ.get("SELECTED") or "all", os.environ.get("BASE", "")
+          if event == "workflow_dispatch":
+              names = list(SERVICES) if selected == "all" else [selected]
+          elif not base or set(base) == {"0"}:
+              names = list(SERVICES)  # new branch: build everything
+          else:
+              files = subprocess.run(["git", "diff", "--name-only", base, "HEAD"], check=True,
+                                     capture_output=True, text=True).stdout.split()
+              hit = lambda patterns: any(re.search(p, f) for p in patterns for f in files)
+              names = [n for n, s in SERVICES.items()
+                       if hit(s["paths"]) or hit(SHARED[s["kind"]]) or hit(ALL)]
+
+          matrix = [{"name": n, **{k: v for k, v in SERVICES[n].items() if k != "paths"}} for n in names]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"matrix={json.dumps(matrix)}\n")
+              out.write(f"python={'true' if any(m['kind'] == 'python' for m in matrix) else 'false'}\n")
+              out.write(f"web={'true' if any(m['kind'] == 'web' for m in matrix) else 'false'}\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("### Servicios a construir: " + (", ".join(names) or "ninguno") + "\n")
+          EOF
+
+  python-checks:
+    name: Python checks (core-api, ia-api)
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Ephemeral database passwords
+        # Random per run and masked: never real secrets.
+        run: |
+          for var in POSTGRES_PASSWORD CHASKI_APP_DB_PASSWORD CHASKI_READONLY_DB_PASSWORD; do
+            value="$(openssl rand -hex 16)"
+            echo "::add-mask::${value}"
+            echo "${var}=${value}" >> "$GITHUB_ENV"
+          done
+
+      - name: Start PostgreSQL 16 with the repo's init scripts
+        run: |
+          docker run -d --name chaski-pg -p 5432:5432 \
+            -e POSTGRES_DB=chaski -e POSTGRES_USER=chaski_admin \
+            -e POSTGRES_PASSWORD -e CHASKI_APP_DB_PASSWORD -e CHASKI_READONLY_DB_PASSWORD \
+            -v "${GITHUB_WORKSPACE}/db/init:/docker-entrypoint-initdb.d:ro" \
+            postgres:16-alpine
+          for _ in $(seq 1 60); do
+            if docker exec chaski-pg pg_isready -h 127.0.0.1 -U chaski_admin -d chaski_test >/dev/null 2>&1; then
+              echo "PostgreSQL ready"; exit 0
+            fi
+            sleep 1
+          done
+          docker logs chaski-pg
+          exit 1
+
+      - name: Install workspace (locked)
+        run: uv sync --all-packages --frozen
+      - name: Ruff lint
+        run: uv run ruff check . --output-format github
+      - name: Ruff format
+        run: uv run ruff format --check .
+      - name: Mypy
+        run: uv run mypy libs/chaski_common/src services/core-api/src services/ia-api/src
+      - name: Pytest (core-api + ia-api)
+        run: uv run pytest services/core-api services/ia-api -q
+
+  web-checks:
+    name: Web checks (cliente, consola)
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install pnpm
+        run: npm install -g "pnpm@${PNPM_VERSION}"
+      - name: Install workspace (locked)
+        run: pnpm install --frozen-lockfile
+      - name: Lint and types
+        run: pnpm lint
+      - name: Tests (Vitest, includes accessibility checks)
+        run: pnpm -r test
+      - name: Build
+        run: pnpm -r build
+
+  image:
+    name: Image ${{ matrix.name }}
+    needs: [changes, python-checks, web-checks]
+    # Runs when the checks of the touched stacks passed (a skipped stack is fine).
+    if: >-
+      !cancelled() && needs.changes.outputs.matrix != '[]'
+      && needs.python-checks.result != 'failure' && needs.web-checks.result != 'failure'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: ${{ github.event_name != 'pull_request' && 'build' || '' }}
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    env:
+      IMAGE_NAME: chaski/${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build (loaded locally, pushed only after the scan)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          tags: ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.title=chaski-${{ matrix.name }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          load: true
+          push: false
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }},mode=max
+
+      - name: Trivy · fail on fixable CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+      - name: Trivy · full report (HIGH + CRITICAL)
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          format: sarif
+          output: trivy-${{ matrix.name }}.sarif
+          skip-setup-trivy: true
+
+      - name: Upload Trivy report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.name }}-trivy
+          path: trivy-${{ matrix.name }}.sarif
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Registry configured?
+        id: cfg
+        if: github.event_name != 'pull_request'
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          ACR_NAME: ${{ vars.ACR_NAME }}
+        run: |
+          if [[ -n "$AZURE_CLIENT_ID" && -n "$ACR_NAME" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Publish skipped::Azure Container Registry is not configured (environment 'build')."
+          fi
+
+      - name: Azure login (OIDC)
+        if: steps.cfg.outputs.configured == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Push sha-<commit> to ACR (the exact image that was scanned)
+        if: steps.cfg.outputs.configured == 'true'
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+        run: |
+          az acr login --name "$ACR_NAME"
+          target="${ACR_NAME}.azurecr.io/${IMAGE_NAME}:sha-${GITHUB_SHA}"
+          docker tag "${IMAGE_NAME}:sha-${GITHUB_SHA}" "$target"
+          docker push "$target"
+          echo "### 📦 ${{ matrix.name }}: \`${target}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-dev:
+    name: Deploy DEV · ${{ matrix.name }}
+    needs: [changes, image]
+    if: >-
+      !cancelled() && needs.image.result == 'success'
+      && github.ref == 'refs/heads/develop' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: dev
+      url: ${{ steps.deploy.outputs.url }}
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    concurrency:
+      group: services-deploy-dev-${{ matrix.name }}
+      cancel-in-progress: false
+    env:
+      IMAGE_NAME: chaski/${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Azure login (OIDC)
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy, smoke test and rollback on failure
+        id: deploy
+        uses: ./.github/actions/deploy-containerapp
+        with:
+          resource-group: ${{ vars.RESOURCE_GROUP }}
+          app: ${{ matrix.app }}
+          image: ${{ vars.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          revision-suffix: gh-${{ github.run_number }}-${{ github.run_attempt }}
+          environment: DEV
+          service: ${{ matrix.name }}
+          smoke-paths: ${{ matrix.smoke }}
+
+      - name: Move the dev tag in ACR
+        # Keeps infra/scripts/deploy.ps1 (which deploys :dev) in sync with what CI deployed.
+        env:
+          ACR_NAME: ${{ vars.ACR_NAME }}
+        run: |
+          az acr login --name "$ACR_NAME"
+          repo="${ACR_NAME}.azurecr.io/${IMAGE_NAME}"
+          docker buildx imagetools create --tag "${repo}:dev" "${repo}:sha-${GITHUB_SHA}"
