@@ -241,7 +241,7 @@ var pipelineEnv = [
 // (console button) and nightly. The pipeline runs from the core-api image.
 var jobs = [
   {
-    name: 'caj-migrate', image: 'chaski/tools', hasImage: true, schedule: ''
+    name: 'caj-migrate', image: 'chaski/tools', hasImage: true, schedule: '', id: 'pipeline'
     // Roles first (no init hook in managed PostgreSQL), then schema, then synthetic data.
     command: [ 'sh', '-c', 'python db/bootstrap_roles.py && alembic -c db/alembic.ini upgrade head && python -m chaski_simulator --reset' ]
     kvSecrets: [ 'migrations-database-url', 'pg-app-password', 'pg-readonly-password' ]
@@ -253,17 +253,35 @@ var jobs = [
   }
   {
     // Ingestion flow (quality checks + quarantine), started from the console button.
-    name: 'caj-pipeline', image: 'chaski/core-api', hasImage: true, schedule: ''
+    name: 'caj-pipeline', image: 'chaski/core-api', hasImage: true, schedule: '', id: 'pipeline'
     command: [ 'python', '-m', 'core_api.pipeline_job' ]
     kvSecrets: [ 'database-url' ]
     env: concat(pipelineEnv, [ { name: 'PIPELINE_TRIGGER', value: 'MANUAL' } ])
   }
   {
     // Same flow every night at 22:00 Lima (03:00 UTC), before PostgreSQL is stopped at 23:00.
-    name: 'caj-pipeline-nightly', image: 'chaski/core-api', hasImage: true, schedule: '0 3 * * *'
+    name: 'caj-pipeline-nightly', image: 'chaski/core-api', hasImage: true, schedule: '0 3 * * *', id: 'pipeline'
     command: [ 'python', '-m', 'core_api.pipeline_job' ]
     kvSecrets: [ 'database-url' ]
     env: concat(pipelineEnv, [ { name: 'PIPELINE_TRIGGER', value: 'PROGRAMADO' } ])
+  }
+  {
+    // GenAI evaluation against the real model (labelled datasets in genai/evals), on demand.
+    name: 'caj-ai-evals', image: 'chaski/ia-api', hasImage: true, schedule: '', id: 'ia'
+    command: [ 'python', '-m', 'ia_api.evals' ]
+    kvSecrets: [ 'database-url' ]
+    env: [
+      { name: 'DATABASE_URL', secretRef: 'database-url' }
+      { name: 'AI_MODE', value: aiMode }
+      { name: 'AUTH_MODE', value: 'entra' }
+      { name: 'ENTRA_TENANT_ID', value: entra.tenantId }
+      { name: 'ENTRA_AUDIENCE', value: entra.audience }
+      { name: 'AZURE_OPENAI_ENDPOINT', value: openAi.endpoint }
+      { name: 'AZURE_OPENAI_DEPLOYMENT', value: openAi.deployment }
+      { name: 'AZURE_OPENAI_API_VERSION', value: '2025-04-01-preview' }
+      { name: 'AZURE_OPENAI_REASONING_EFFORT', value: 'minimal' }
+      { name: 'CONTENT_SAFETY_ENDPOINT', value: openAi.contentSafetyEndpoint }
+    ]
   }
 ]
 
@@ -273,7 +291,7 @@ resource jobRes 'Microsoft.App/jobs@2024-03-01' = [for j in jobs: {
   tags: union(tags, { service: j.image })
   identity: {
     type: 'UserAssigned'
-    userAssignedIdentities: { '${identities.pipeline.id}': {} }
+    userAssignedIdentities: { '${identities[j.id].id}': {} }
   }
   properties: {
     environmentId: cae.id
@@ -284,8 +302,8 @@ resource jobRes 'Microsoft.App/jobs@2024-03-01' = [for j in jobs: {
       replicaRetryLimit: 0
       manualTriggerConfig: empty(j.schedule) ? { parallelism: 1, replicaCompletionCount: 1 } : null
       scheduleTriggerConfig: empty(j.schedule) ? null : { cronExpression: j.schedule, parallelism: 1, replicaCompletionCount: 1 }
-      registries: [ { server: acrLoginServer, identity: identities.pipeline.id } ]
-      secrets: map(j.kvSecrets, s => kvSecret(s, keyVaultUri, identities.pipeline.id))
+      registries: [ { server: acrLoginServer, identity: identities[j.id].id } ]
+      secrets: map(j.kvSecrets, s => kvSecret(s, keyVaultUri, identities[j.id].id))
     }
     template: {
       containers: [
@@ -294,7 +312,7 @@ resource jobRes 'Microsoft.App/jobs@2024-03-01' = [for j in jobs: {
           image: usePlaceholderImages || !j.hasImage ? placeholderImage : '${acrLoginServer}/${j.image}:${imageTag}'
           command: usePlaceholderImages || !j.hasImage ? null : j.command
           resources: { cpu: json('0.5'), memory: '1Gi' }
-          env: concat(j.env, [ { name: 'AZURE_CLIENT_ID', value: identities.pipeline.clientId } ])
+          env: concat(j.env, [ { name: 'AZURE_CLIENT_ID', value: identities[j.id].clientId } ])
         }
       ]
     }

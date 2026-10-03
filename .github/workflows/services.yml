@@ -18,6 +18,7 @@ on:
       - "services/ia-api/**"
       - "libs/chaski_common/**"
       - "genai/prompts/**"
+      - "genai/evals/**"
       - "apps/**"
       - "packages/shared/**"
       - "docker/web/**"
@@ -80,7 +81,7 @@ jobs:
               "core-api": {"dockerfile": "services/core-api/Dockerfile", "app": "ca-core", "kind": "python",
                            "smoke": "/health /ready", "paths": [r"^services/core-api/"]},
               "ia-api":   {"dockerfile": "services/ia-api/Dockerfile", "app": "ca-ia", "kind": "python",
-                           "smoke": "/health /ready", "paths": [r"^services/ia-api/", r"^genai/prompts/"]},
+                           "smoke": "/health /ready", "paths": [r"^services/ia-api/", r"^genai/"]},
               "cliente":  {"dockerfile": "apps/cliente/Dockerfile", "app": "ca-cliente", "kind": "web",
                            "smoke": "/ /env.js", "paths": [r"^apps/cliente/"]},
               "consola":  {"dockerfile": "apps/consola/Dockerfile", "app": "ca-consola", "kind": "web",
@@ -164,6 +165,39 @@ jobs:
         run: uv run mypy libs/chaski_common/src services/core-api/src services/ia-api/src
       - name: Pytest (core-api + ia-api)
         run: uv run pytest services/core-api services/ia-api -q
+
+      - name: GenAI evaluation (mock provider, quality gate >= 70 %)
+        # Labelled datasets in genai/evals; the real model is evaluated by the caj-ai-evals job.
+        env:
+          AI_MODE: mock
+          AUTH_MODE: dev
+          DEV_JWT_SECRET: ci-only-evaluation-secret-not-used-0123456789
+        run: |
+          export DATABASE_URL="postgresql+psycopg://chaski_app:${CHASKI_APP_DB_PASSWORD}@localhost:5432/chaski_test"
+          uv run python -m ia_api.evals --min-accuracy 0.7 --output ai-evals.json > /dev/null
+          python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          r = json.load(open("ai-evals.json", encoding="utf-8"))
+          q, a = r["quejas"], r["asistente"]
+          print("## Evaluación GenAI (proveedor mock)")
+          print("| Métrica | Valor |")
+          print("|---|---|")
+          print(f"| Accuracy categoría (quejas) | {q['accuracy_categoria']:.1%} |")
+          print(f"| Accuracy urgencia | {q['accuracy_urgencia']:.1%} |")
+          print(f"| Detección de prompt injection | {q['deteccion_inyeccion']:.1%} |")
+          print(f"| Falsos positivos 'sospechosa' | {q['falsos_positivos_sospechosa']:.1%} |")
+          print(f"| Revisión humana | {q['tasa_revision_humana']:.1%} |")
+          print(f"| Herramienta correcta (asistente) | {a['accuracy_herramienta']:.1%} |")
+          EOF
+
+      - name: Upload GenAI evaluation report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ai-evals-mock
+          path: ai-evals.json
+          if-no-files-found: ignore
+          retention-days: 30
 
   web-checks:
     name: Web checks (cliente, consola)
