@@ -1,6 +1,22 @@
 # Power BI · Chaski Insights (Fase 8)
 
-Informe de 3 páginas (**Dirección**, **Riesgos** y **Marketing**) sobre el DW en Azure SQL que carga el pipeline (`caj-pipeline`, cada noche a las 22:00 Lima, o con el botón "Ejecutar pipeline" de la consola).
+Informe de toma de decisiones para **Dirección, Riesgos y Marketing**, con un **Simulador de Decisiones** (escenarios what-if). Se conecta al DW en Azure SQL que carga el pipeline (`caj-pipeline`, cada noche a las 22:00 Lima, o con el botón "Ejecutar pipeline" de la consola).
+
+Cubre del PDF: *"Presentación de Reportes en Power BI para la simulación de toma de decisiones"* y la capa b) *"dashboards de negocio (dirección, riesgos, marketing)"*.
+
+| Archivo | Uso |
+|---|---|
+| `README.md` | Esta guía |
+| `medidas.dax` | Todas las medidas y el simulador |
+| `chaski-theme.json` | Tema visual CHASKI |
+| `chaski.pbix` | Informe final (se genera en Desktop) |
+| `chaski.pdf` | Export del informe como evidencia |
+
+Tiempo estimado: 2 a 3 horas.
+
+---
+
+## 1. Conexión
 
 | Dato | Valor |
 |---|---|
@@ -12,11 +28,12 @@ Informe de 3 páginas (**Dirección**, **Riesgos** y **Marketing**) sobre el DW 
 
 > Azure SQL usa la oferta gratuita con **pausa automática**: la primera conexión del día puede tardar hasta 1 minuto mientras despierta. Es normal.
 
-## 1. Conectar (Power BI Desktop)
-
-1. *Obtener datos* → **Azure SQL Database** → servidor y base de la tabla anterior → **Importar**.
+1. Power BI Desktop → *Obtener datos* → **Azure SQL Database** → servidor y base de la tabla → modo **Importar** (no DirectQuery: no despierta la base en cada clic y la demo va más rápida).
 2. Credenciales: **Cuenta de Microsoft** → *Iniciar sesión* con la cuenta UTP.
 3. Selecciona: `dw.dim_date`, `dw.dim_region`, `dw.dim_product`, `dw.dim_customer`, `dw.dim_delinquency_bucket`, `dw.fact_profitability_monthly`, `dw.fact_portfolio_daily` y la vista `dw.v_rentabilidad_rollup`.
+4. *Vista* → *Temas* → *Examinar temas* → `chaski-theme.json`.
+
+---
 
 ## 2. Modelo estrella (vista *Modelo*)
 
@@ -29,69 +46,163 @@ Informe de 3 páginas (**Dirección**, **Riesgos** y **Marketing**) sobre el DW 
 | `fact_profitability_monthly[product]` | `dim_product[code]` | producto | Varios a uno |
 | `fact_portfolio_daily[bucket]` | `dim_delinquency_bucket[name]` | bucket SBS | Varios a uno |
 
-- En `dim_customer`, filtra `is_current = 1` (Power Query → *Filtrar filas*). Es una dimensión **SCD2**: las filas antiguas guardan la historia de segmento y región.
-- Marca `dim_date` como **tabla de fechas** (columna `date`).
+- `dim_customer` es **SCD2**: filas antiguas guardan la historia de segmento y región. Las medidas de clientes filtran `is_current = 1` (no hace falta filtrar en Power Query, así la historia queda disponible).
+- `dim_customer` **no se relaciona** con los hechos; sus medidas usan `created_month` y `active_loans` directamente.
+- Marca `dim_date` como **tabla de fechas** (columna `date`). Si no tiene columnas de mes, agrégalas (sección 0 de `medidas.dax`).
+- Ordena `dim_delinquency_bucket[name]` por su columna de orden (Normal, CPP, Deficiente, Dudoso, Pérdida).
+- Oculta en la vista de informe las columnas de unión de los hechos (`region`, `product`, `bucket`, `date`, `month`) para usar siempre las de las dimensiones.
 
-## 3. Medidas DAX
+---
 
-Crea una tabla `_Medidas` (*Especificar datos* vacía) y agrega:
+## 3. Medidas y parámetros
 
-```DAX
-Margen = SUM ( fact_profitability_monthly[margin] )
+1. *Inicio* → *Especificar datos* → tabla vacía `_Medidas`.
+2. Copia todas las medidas de `medidas.dax` con el formato indicado en cada comentario: moneda **S/** con 0 decimales para montos y porcentaje con 1 decimal para ratios.
+3. Crea los 4 parámetros what-if (*Modelado* → *Nuevo parámetro* → *Rango numérico*): **Shock Mora**, **Variación Tasa**, **Umbral Mora**, **LGD**, con los rangos de la sección 4 de `medidas.dax`.
 
-Ingresos = SUM ( fact_profitability_monthly[interest_income] ) + SUM ( fact_profitability_monthly[fees] )
+> **Regla clave:** `fact_portfolio_daily` es un snapshot diario. Todas las medidas de cartera leen la **fecha de corte** (último día con datos del filtro). Sumar todos los días infla la cartera unas 30 veces al ver un mes.
 
-Cartera Total = SUM ( fact_portfolio_daily[outstanding_balance] )
+### Validación contra el DW
+Antes de armar visuales, compara en Azure SQL:
 
-Cartera Vigente =
-    CALCULATE ( [Cartera Total], fact_portfolio_daily[days_past_due] = 0 )
-
-Ratio Mora =
-    DIVIDE (
-        CALCULATE ( [Cartera Total], fact_portfolio_daily[days_past_due] > 30 ),
-        [Cartera Total]
-    )
-
-Cartera Último Día =
-    CALCULATE ( [Cartera Total], LASTDATE ( dim_date[date] ) )
-
-Clientes = CALCULATE ( COUNTROWS ( dim_customer ), dim_customer[is_current] = 1 )
-
-Clientes Nuevos (mes) =
-    CALCULATE (
-        [Clientes],
-        FILTER ( dim_customer, dim_customer[created_month] = MAX ( dim_date[date] ) - DAY ( MAX ( dim_date[date] ) ) + 1 )
-    )
-
-Penetración Préstamos = DIVIDE ( SUM ( dim_customer[active_loans] ) , [Clientes] )
+```sql
+DECLARE @corte date = (SELECT MAX([date]) FROM dw.fact_portfolio_daily);
+SELECT
+    @corte AS fecha_corte,
+    SUM(outstanding_balance) AS cartera_total,
+    SUM(CASE WHEN days_past_due > 30 THEN outstanding_balance ELSE 0 END)
+        * 1.0 / NULLIF(SUM(outstanding_balance), 0) AS ratio_mora
+FROM dw.fact_portfolio_daily
+WHERE [date] = @corte;
 ```
 
-Formato: `Margen`, `Ingresos` y las medidas de cartera como moneda **S/** con 0 decimales; `Ratio Mora` y `Penetración Préstamos` como porcentaje con 1 decimal.
+Una tarjeta sin filtros con `Cartera Total` y `Ratio Mora` debe dar los mismos valores. Anótalos aquí:
+
+| Fecha de corte | Cartera Total | Ratio Mora |
+|---|---|---|
+| | | |
+
+---
 
 ## 4. Páginas
 
-| Página | Visuales |
-|---|---|
-| **Dirección** | Tarjetas: Margen, Ingresos, Cartera Último Día, Ratio Mora · Barras: Margen por producto · Líneas: Margen por mes · Barras: Top 5 regiones por margen · Tabla: `v_rentabilidad_rollup` (subtotales y total con `ROLLUP`) · Segmentador: segmento |
-| **Riesgos** | Columnas apiladas: Cartera por bucket SBS (Normal, CPP, Deficiente, Dudoso, Pérdida) · Barras: Ratio Mora por región · Líneas: Cartera Total y Cartera Vigente por fecha · Mapa (o mapa coroplético) por región · Segmentador: bucket |
-| **Marketing** | Anillo: Clientes por segmento · Barras: Clientes por región · Tarjetas: Clientes, Penetración Préstamos · Columnas: Clientes Nuevos por mes (`created_month`) |
+Encabezado común: logo CHASKI, título y segmentadores de **Mes** y **Región** sincronizados entre páginas (*Vista* → *Sincronizar segmentaciones*). Colores: verde `#00A94F` (positivo/vigente), azul `#003B7A` (serie principal), rojo solo para mora.
 
-Usa los colores de CHASKI: verde `#00A94F` (positivo / vigente) y azul `#003B7A` (serie principal). Evita el rojo salvo para mora.
+### Página 1 · Resumen Ejecutivo
+| Visual | Contenido |
+|---|---|
+| 6 tarjetas | Ingresos, Margen, Margen %, Cartera Total, Ratio Mora, Clientes |
+| Líneas | Margen y Margen YTD por mes |
+| Columnas + línea | Cartera Total por mes, Ratio Mora en eje secundario |
+| Tarjetas de texto | Producto Más Rentable, Región con Mayor Mora |
+| Narrativa inteligente | Resumen automático de los KPIs |
+
+### Página 2 · Dirección · Rentabilidad
+| Visual | Contenido |
+|---|---|
+| Tarjetas | Margen, Ingresos, Margen %, Var. Margen MoM % |
+| Cascada | Ingresos por Intereses + Comisiones − Costo de Fondeo − Provisiones = Margen |
+| Barras | Margen por producto (`dim_product[code]`) |
+| Líneas | Margen por mes |
+| Barras | Top 5 regiones por margen (filtro Top N) |
+| Tabla | `v_rentabilidad_rollup` (subtotales y total con `ROLLUP`, evidencia de SQL analítico) |
+| Segmentador | Segmento |
+
+**Pregunta de negocio:** *¿Qué producto y segmento generan más margen y dónde crecer?*
+
+### Página 3 · Riesgos · Morosidad
+| Visual | Contenido |
+|---|---|
+| Título dinámico | Medida `Título Riesgos` |
+| Tarjetas | Ratio Mora, Var. Mora (pb), Ratio Alto Riesgo, Cartera Atrasada |
+| Columnas apiladas 100% | Cartera Total por mes y bucket SBS |
+| Barras | Ratio Mora por región, color con `Color Mora` + línea constante del umbral |
+| Líneas | Cartera Total y Cartera Vigente por mes |
+| Mapa coroplético | Ratio Mora por región |
+| Árbol de descomposición | Cartera Atrasada por región → bucket |
+| Segmentador | Bucket |
+
+Configura **obtención de detalles** hacia una página oculta **Detalle Región**: tendencia de Ratio Mora, cartera por bucket y margen de esa región.
+
+**Pregunta de negocio:** *¿Dónde se deteriora la cartera y qué tan grave es?*
+
+### Página 4 · Marketing · Clientes
+| Visual | Contenido |
+|---|---|
+| Tarjetas | Clientes, Clientes con Préstamo, Penetración Préstamos, Margen por Cliente |
+| Anillo | Clientes por segmento (`dim_customer[segment]`) |
+| Barras | Clientes por región (`dim_customer[region]`) |
+| Columnas | Clientes Nuevos (mes) por mes |
+| Barras | Penetración Préstamos por segmento |
+
+**Pregunta de negocio:** *¿Qué segmento tiene muchos clientes pero baja penetración de préstamos?* Ahí va la campaña.
+
+### Página 5 · Simulador de Decisiones
+| Visual | Contenido |
+|---|---|
+| 4 segmentadores de parámetro | Shock Mora, Variación Tasa, Umbral Mora, LGD |
+| Segmentador de mes | Selección única, por defecto el último mes |
+| Tarjetas comparativas | Ratio Mora vs. Mora Simulada · Margen vs. Margen Simulado · Var. Margen Simulado % · Pérdida Esperada Adicional |
+| Columnas agrupadas | Por región: Ratio Mora vs. Mora Simulada, con línea del umbral |
+| Tabla | Regiones con Mora Simulada mayor al umbral |
+| Tarjeta grande | **Decisión Sugerida** |
+
+**Marcadores** (con botones en la página):
+- **Escenario base:** todo en 0.
+- **Estrés moderado:** shock 30%, tasa +10%.
+- **Estrés severo:** shock 80%, tasa +20%.
+
+Supuestos del simulador (decirlos en la exposición): la mora sube con sensibilidad 0.5 ante alzas de tasa; la pérdida esperada es cartera × aumento de mora × LGD; el impacto se lee sobre un mes.
+
+---
 
 ## 5. Seguridad a nivel de fila (RLS)
 
-*Modelado* → **Administrar roles** → *Nuevo* → `Riesgos Norte` → tabla `dim_region`:
+*Modelado* → **Administrar roles**:
 
-```DAX
-[name] IN { "La Libertad", "Piura", "Lambayeque" }
-```
+| Rol | Tabla | Filtro DAX |
+|---|---|---|
+| Direccion | (sin filtro) | Ve todo |
+| Riesgos Norte | `dim_region` | `[name] IN { "La Libertad", "Piura", "Lambayeque" }` |
+| Riesgos Sur | `dim_region` | `[name] IN { "Arequipa", "Cusco" }` |
 
-Las relaciones propagan el filtro a ambos hechos. Pruébalo con *Ver como* → `Riesgos Norte`: Riesgos Norte solo ve las 3 regiones del norte. Es la demostración de seguridad a nivel de fila que pide la guía.
+Las relaciones propagan el filtro a ambos hechos. Prueba con *Ver como* → `Riesgos Norte`: solo ve las 3 regiones del norte. Toma captura para la PPT.
 
-## 6. Publicar y embeber
+**Para la defensa:** RLS en Power BI se suma al RBAC de la consola, a la autenticación solo Entra y al firewall de Azure SQL: seguridad en cada capa.
+
+---
+
+## 6. Escenarios de decisión para la exposición
+
+| # | Área | Pregunta | Dónde se responde | Decisión |
+|---|---|---|---|---|
+| 1 | Dirección | ¿Qué producto impulsar? | Cascada y Margen por producto (pág. 2) | Priorizar el producto con mayor Margen % |
+| 2 | Riesgos | ¿Qué región frenar? | Barras con Color Mora + Detalle Región (pág. 3) | Endurecer políticas en la región en rojo |
+| 3 | Marketing | ¿A quién dirigir la campaña? | Penetración por segmento (pág. 4) | Segmento con más clientes y menor penetración |
+| 4 | Comité | ¿Qué pasa si la mora sube 30% y las tasas 10%? | Simulador, marcador "Estrés moderado" | Lo que indique Decisión Sugerida, con la pérdida cuantificada |
+
+Guion en la demo (2 minutos): Resumen → Riesgos (región en rojo y drillthrough) → Simulador (cambiar de marcador en vivo y leer la decisión).
+
+---
+
+## 7. Publicar y embeber
 
 - **Con Power BI Pro** (o la prueba de 60 días): *Publicar* → workspace `CHASKI` → *Archivo* → *Insertar informe* → **Sitio web o portal** (embed seguro: pide inicio de sesión) → copia la URL.
 - Pásala a la consola en la variable `CHASKI_POWERBI_EMBED_URL` de `ca-consola`. Es una línea en `infra/modules/containerapps.bicep` (env de las webs) que se aplica con el workflow de infraestructura. La CSP de las webs ya permite `https://app.powerbi.com`. Aparece como pestaña **Power BI** en Chaski Insights.
 - **Sin licencia:** demo desde Power BI Desktop (pantalla compartida). La consola ya muestra los mismos indicadores con sus propios gráficos.
 
 > `Publish to web` (público) solo es aceptable porque los datos son **simulados**. Con datos reales de un banco, nunca: se usa el embed seguro con Entra ID.
+
+---
+
+## 8. Checklist
+
+- [ ] Conexión en modo Importar con cuenta UTP
+- [ ] Relaciones y `dim_date` marcada como tabla de fechas
+- [ ] Medidas de `medidas.dax` y 4 parámetros what-if
+- [ ] Validación SQL vs. tarjetas anotada en la sección 3
+- [ ] 5 páginas + Detalle Región (drillthrough)
+- [ ] 3 marcadores de escenarios con botones
+- [ ] RLS probado con *Ver como*
+- [ ] `chaski.pbix` y `chaski.pdf` en `powerbi/`
+- [ ] Capturas en la PPT
