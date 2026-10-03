@@ -43,3 +43,13 @@ def test_stdout_handler_has_the_filter() -> None:
     assert any(
         isinstance(f, RedactingFilter) for h in logging.getLogger().handlers for f in h.filters
     )
+
+
+def test_sdk_request_logs_are_quiet_but_warnings_pass() -> None:
+    from chaski_common.logging import NOISY_LOGGERS, configure_logging
+
+    configure_logging("t")
+    for name in NOISY_LOGGERS:
+        lg = logging.getLogger(name)
+        assert not lg.isEnabledFor(logging.INFO) and lg.isEnabledFor(logging.WARNING)
+    assert logging.getLogger("core_api.x").isEnabledFor(logging.INFO)
