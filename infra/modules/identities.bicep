@@ -1,12 +1,14 @@
-// One user-assigned managed identity per workload, plus one for GitHub Actions (OIDC).
-// The GitHub identity trusts only this repository's deployment environments.
+// One user-assigned managed identity per workload, plus two for GitHub Actions (OIDC):
+//   id-<prefix>-github        deploys apps (build/dev/test/prod) and runs ops tasks (ops)
+//   id-<prefix>-github-infra  applies the Bicep (environment infra, main only)
+// Each trusts only this repository's deployment environments.
 param location string
 param tags object
 param prefix string
 param githubRepo string
 @description('OIDC subject prefix. Repos with immutable-ID subjects use repo:<owner>@<ownerId>/<repo>@<repoId>.')
 param githubSubjectPrefix string = 'repo:${githubRepo}'
-param githubEnvironments array = [ 'build', 'dev', 'test', 'prod' ]
+param githubEnvironments array = [ 'build', 'dev', 'test', 'prod', 'ops' ]
 
 var workloads = [ 'cuentas', 'core', 'ia', 'web', 'pipeline' ]
 
@@ -34,6 +36,22 @@ resource fic 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentity
   }
 }]
 
+resource githubInfra 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: 'id-${prefix}-github-infra'
+  location: location
+  tags: tags
+}
+
+resource ficInfra 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = {
+  parent: githubInfra
+  name: 'gh-infra'
+  properties: {
+    issuer: 'https://token.actions.githubusercontent.com'
+    subject: '${githubSubjectPrefix}:environment:infra'
+    audiences: [ 'api://AzureADTokenExchange' ]
+  }
+}
+
 // Order matches `workloads`.
 output identities object = {
   cuentas: { id: ids[0].id, principalId: ids[0].properties.principalId, clientId: ids[0].properties.clientId }
@@ -46,4 +64,9 @@ output github object = {
   id: github.id
   principalId: github.properties.principalId
   clientId: github.properties.clientId
+}
+output githubInfra object = {
+  id: githubInfra.id
+  principalId: githubInfra.properties.principalId
+  clientId: githubInfra.properties.clientId
 }

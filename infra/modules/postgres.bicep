@@ -9,6 +9,8 @@ param workspaceId string
 param adminLogin string = 'chaski_admin'
 @secure()
 param adminPassword string
+@description('GitHub ops identity that starts/stops the server on a schedule.')
+param opsPrincipalId string
 
 resource pg 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
   name: name
@@ -51,7 +53,38 @@ resource extensions 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@20
   dependsOn: [ tls ]
 }
 
-resource diag'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+// Scheduled start/stop (pg-schedule workflow): a custom role with just those actions,
+// assigned on this server only.
+resource startStopRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
+  name: guid(resourceGroup().id, 'chaski-pg-start-stop')
+  properties: {
+    roleName: 'CHASKI PostgreSQL start/stop (${resourceGroup().name})'
+    description: 'Read, start and stop the CHASKI PostgreSQL flexible server.'
+    type: 'CustomRole'
+    assignableScopes: [ resourceGroup().id ]
+    permissions: [
+      {
+        actions: [
+          'Microsoft.DBforPostgreSQL/flexibleServers/read'
+          'Microsoft.DBforPostgreSQL/flexibleServers/start/action'
+          'Microsoft.DBforPostgreSQL/flexibleServers/stop/action'
+        ]
+      }
+    ]
+  }
+}
+
+resource opsStartStop 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(pg.id, opsPrincipalId, startStopRole.id)
+  scope: pg
+  properties: {
+    roleDefinitionId: startStopRole.id
+    principalId: opsPrincipalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource diag 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
   name: 'to-log-analytics'
   scope: pg
   properties: {

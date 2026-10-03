@@ -255,8 +255,8 @@ var jobs = [
     env: concat(pipelineEnv, [ { name: 'PIPELINE_TRIGGER', value: 'MANUAL' } ])
   }
   {
-    // Same flow every night at 01:00 Lima (06:00 UTC).
-    name: 'caj-pipeline-nightly', image: 'chaski/core-api', hasImage: true, schedule: '0 6 * * *'
+    // Same flow every night at 22:00 Lima (03:00 UTC), before PostgreSQL is stopped at 23:00.
+    name: 'caj-pipeline-nightly', image: 'chaski/core-api', hasImage: true, schedule: '0 3 * * *'
     command: [ 'python', '-m', 'core_api.pipeline_job' ]
     kvSecrets: [ 'database-url' ]
     env: concat(pipelineEnv, [ { name: 'PIPELINE_TRIGGER', value: 'PROGRAMADO' } ])
