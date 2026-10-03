@@ -30,6 +30,8 @@ param githubRepo string = 'Matthewzegarra0312/chaski'
 param enableSentinel bool = true
 @description('Wire the read-only GitHub token (Key Vault github-readonly-token) into core-api.')
 param enableGithubToken bool = false
+@description('Wire the ApisPeru DNI token (Key Vault dni-lookup-token) into core-api.')
+param enableDniLookup bool = false
 @description('End of the Sentinel trial: after this date the template no longer onboards it (sentinel-offboard workflow removes it).')
 param sentinelTrialEnds string = '2026-11-01T00:00:00Z'
 param deploymentTime string = utcNow('yyyy-MM-ddTHH:mm:ssZ')
@@ -201,6 +203,7 @@ module apps 'modules/containerapps.bicep' = if (deployWorkloads) {
     githubRepo: githubRepo
     apiGatewayUrl: 'https://${apimName}.azure-api.net'
     enableGithubToken: enableGithubToken
+    enableDniLookup: enableDniLookup
     dw: { server: sql!.outputs.fqdn, database: sql!.outputs.database }
     openAi: {
       endpoint: ai.outputs.openAiEndpoint

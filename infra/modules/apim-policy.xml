@@ -23,7 +23,8 @@
               || path.EndsWith(&quot;/health&quot;)
               || path.EndsWith(&quot;/ready&quot;)
               || path.EndsWith(&quot;/api/v1/fraud/webhook&quot;)
-              || (method == &quot;POST&quot; &amp;&amp; path.EndsWith(&quot;/api/v1/onboarding&quot;));
+              || (method == &quot;POST&quot; &amp;&amp; path.EndsWith(&quot;/api/v1/onboarding&quot;))
+              || (method == &quot;GET&quot; &amp;&amp; path.Contains(&quot;/api/v1/onboarding/lookup-dni/&quot;));
         }">
       </when>
       <otherwise>

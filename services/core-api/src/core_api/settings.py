@@ -27,6 +27,11 @@ class CoreSettings(CommonSettings):
     github_repo: str | None = None
     github_token: SecretStr | None = None
 
+    # ApisPeru DNI lookup. Empty token → mock. Never put the token in the repo.
+    dni_lookup_mode: Literal["auto", "mock", "apisperu"] = "auto"
+    dni_lookup_token: SecretStr | None = None
+    dni_lookup_base_url: str = "https://dniruc.apisperu.com/api/v1"
+
     @property
     def pipeline_job_configured(self) -> bool:
         return bool(

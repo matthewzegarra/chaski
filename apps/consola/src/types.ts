@@ -68,6 +68,7 @@ export interface PendingOnboarding {
   customer: CustomerMasked
   document_id: string | null
   extracted: Record<string, string> | null
+  lookup: Record<string, string> | null
   confidence: number | null
   checks: Record<string, boolean | null>
 }

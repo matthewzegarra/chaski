@@ -54,6 +54,8 @@ os.environ.update(
         "FRAUD_WEBHOOK_SECRET": "test-webhook-secret",
         "APPLICATIONINSIGHTS_CONNECTION_STRING": "",
         "EVENTSTREAM_CONNECTION_STRING": "",
+        "DNI_LOOKUP_MODE": "mock",
+        "DNI_LOOKUP_TOKEN": "",
     }
 )
 

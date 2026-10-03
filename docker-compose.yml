@@ -106,6 +106,9 @@ services:
       PIPELINE_JOB_NAME: ${PIPELINE_JOB_NAME:-}
       GITHUB_REPO: ${GITHUB_REPO:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      DNI_LOOKUP_MODE: ${DNI_LOOKUP_MODE:-auto}
+      DNI_LOOKUP_TOKEN: ${DNI_LOOKUP_TOKEN:-}
+      DNI_LOOKUP_BASE_URL: ${DNI_LOOKUP_BASE_URL:-https://dniruc.apisperu.com/api/v1}
       UPLOADS_DIR: /data/uploads
     volumes:
       - uploads:/data/uploads

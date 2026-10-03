@@ -25,7 +25,7 @@ Ten a mano la imagen `docs/samples/dni_demo.png` para el onboarding.
 
 1. **Bienvenida** (A). Explica la propuesta: banco 100 % digital, PWA instalable.
 2. **Onboarding en 3 pasos.** Clic en *Abrir mi cuenta*:
-   - Paso 1: completa los datos (DNI de 8 dígitos y una región).
+   - Paso 1: escribe el DNI (8 dígitos) y pulsa **Consultar** para rellenar nombres y apellidos; el cliente los confirma. Sin token de ApisPeru el mock devuelve un nombre determinista.
    - Paso 2: sube `docs/samples/dni_demo.png` (en el celular, el botón abre la cámara).
    - Paso 3: el cliente valida lo que la IA leyó del DNI. Si algún dato no coincide aparece la alerta, y la solicitud queda **"En revisión"**.
    - Clic en *Ingresar a mi cuenta*: la app bloquea las operaciones hasta la aprobación KYC.
