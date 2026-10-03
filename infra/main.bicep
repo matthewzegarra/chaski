@@ -26,6 +26,8 @@ param deployerObjectId string
 param deployerUpn string
 
 param githubRepo string = 'Matthewzegarra0312/chaski'
+@description('GitHub OIDC subject prefix (this repo uses immutable owner/repo ids).')
+param githubSubjectPrefix string = 'repo:Matthewzegarra0312@119908185/chaski@1401839661'
 @description('Entra ID values from infra/entra/.out/entra.json (identity tenant).')
 param entra object
 
@@ -60,7 +62,7 @@ module monitoring 'modules/monitoring.bicep' = {
 module identities 'modules/identities.bicep' = {
   scope: rg
   name: 'identities'
-  params: { location: location, tags: tags, prefix: prefix, githubRepo: githubRepo }
+  params: { location: location, tags: tags, prefix: prefix, githubRepo: githubRepo, githubSubjectPrefix: githubSubjectPrefix }
 }
 
 module keyvault 'modules/keyvault.bicep' = {
