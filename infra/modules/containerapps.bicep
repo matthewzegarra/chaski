@@ -294,10 +294,21 @@ resource coreStartsPipeline 'Microsoft.Authorization/roleAssignments@2022-04-01'
   }
 }
 
-// GitHub Actions deploys only the three cuentas-api apps.
-resource ghDeploy 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for i in range(0, 3): {
+// GitHub Actions deploys the CHASKI apps (cuentas dev/test/prod, core, ia and the two
+// webs): Contributor scoped to each app only, never to the resource group.
+resource ghDeploy 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for i in range(0, length(apis)): {
   name: guid(apiApps[i].id, githubPrincipalId, contributor)
   scope: apiApps[i]
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', contributor)
+    principalId: githubPrincipalId
+    principalType: 'ServicePrincipal'
+  }
+}]
+
+resource ghDeployWeb 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for i in range(0, length(webs)): {
+  name: guid(webApps[i].id, githubPrincipalId, contributor)
+  scope: webApps[i]
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', contributor)
     principalId: githubPrincipalId
@@ -335,19 +346,23 @@ resource ghJoin 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
-resource cuentasIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = {
-  name: last(split(identities.cuentas.id, '/'))
-}
+// A deploy re-submits the app's user-assigned identity, which needs Managed Identity
+// Operator on that identity.
+var deployedIdentities = [ 'cuentas', 'core', 'ia', 'web' ]
 
-resource ghIdentityOperator 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(cuentasIdentity.id, githubPrincipalId, managedIdentityOperator)
-  scope: cuentasIdentity
+resource appIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = [for k in deployedIdentities: {
+  name: last(split(identities[k].id, '/'))
+}]
+
+resource ghIdentityOperator 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (k, i) in deployedIdentities: {
+  name: guid(appIdentity[i].id, githubPrincipalId, managedIdentityOperator)
+  scope: appIdentity[i]
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', managedIdentityOperator)
     principalId: githubPrincipalId
     principalType: 'ServicePrincipal'
   }
-}
+}]
 
 output environmentName string = cae.name
 output defaultDomain string = domain
