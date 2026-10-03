@@ -1,0 +1,65 @@
+# Starts PostgreSQL every morning and stops it every night, from the cloud (FinOps):
+# ~15 h/day on instead of 24 h roughly halves the compute cost. The nightly ingestion
+# pipeline runs at 22:00 Lima, before the stop.
+#
+#   08:00 Lima (13:00 UTC) ... start
+#   23:00 Lima (04:00 UTC) ... stop
+#   workflow_dispatch ........ start or stop on demand
+#
+# Runs as id-chaski-github (environment `ops`, main only) with a custom role that can only
+# read, start and stop this server.
+name: PostgreSQL schedule
+
+on:
+  schedule:
+    - cron: "0 13 * * *"
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Start or stop PostgreSQL
+        type: choice
+        options: [start, stop]
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pg-schedule
+  cancel-in-progress: false
+
+jobs:
+  power:
+    name: PostgreSQL ${{ inputs.action || (github.event.schedule == '0 13 * * *' && 'start' || 'stop') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: ops
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ACTION: ${{ inputs.action || (github.event.schedule == '0 13 * * *' && 'start' || 'stop') }}
+      RG: ${{ vars.RESOURCE_GROUP }}
+      SERVER: ${{ vars.PG_SERVER_NAME }}
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ${{ env.ACTION }}
+        run: |
+          state="$(az postgres flexible-server show -g "$RG" -n "$SERVER" --query state -o tsv)"
+          echo "Estado actual: ${state}"
+          if [[ "$ACTION" == "start" && "$state" == "Stopped" ]]; then
+            az postgres flexible-server start -g "$RG" -n "$SERVER" -o none
+          elif [[ "$ACTION" == "stop" && "$state" == "Ready" ]]; then
+            az postgres flexible-server stop -g "$RG" -n "$SERVER" -o none
+          else
+            echo "Nada que hacer (${ACTION} con estado ${state})."
+          fi
+          final="$(az postgres flexible-server show -g "$RG" -n "$SERVER" --query state -o tsv)"
+          echo "### PostgreSQL ${ACTION}: ${state} → ${final}" >> "$GITHUB_STEP_SUMMARY"

@@ -48,6 +48,44 @@ var suffix = take(uniqueString(subscription().id, resourceGroupName), 6)
 var kvName = 'kv-${prefix}-${suffix}'
 var apimName = 'apim-${prefix}-${suffix}'
 
+// ---------------------------------------------------------------- GitHub IaC identity
+// Subscription level: only what a subscription-scoped deployment of this template needs
+// (deployments and the resource group). Everything else: Owner on rg-chaski only.
+resource iacRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
+  name: guid(subscription().id, 'chaski-iac-deployer')
+  properties: {
+    roleName: 'CHASKI IaC deployer (subscription deployments)'
+    description: 'Create subscription-scoped deployments and the CHASKI resource group.'
+    type: 'CustomRole'
+    assignableScopes: [ subscription().id ]
+    permissions: [
+      {
+        actions: [
+          'Microsoft.Resources/deployments/*'
+          'Microsoft.Resources/subscriptions/read'
+          'Microsoft.Resources/subscriptions/resourceGroups/read'
+          'Microsoft.Resources/subscriptions/resourceGroups/write'
+        ]
+      }
+    ]
+  }
+}
+
+resource iacOnSubscription 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(subscription().id, 'id-${prefix}-github-infra', iacRole.id)
+  properties: {
+    roleDefinitionId: iacRole.id
+    principalId: identities.outputs.githubInfra.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+module iacOnRg 'modules/rg-owner.bicep' = {
+  scope: rg
+  name: 'iac-rg-owner'
+  params: { principalId: identities.outputs.githubInfra.principalId }
+}
+
 module network 'modules/network.bicep' = {
   scope: rg
   name: 'network'
@@ -151,6 +189,7 @@ module postgres 'modules/postgres.bicep' = if (deployWorkloads) {
     privateDnsZoneId: network.outputs.pgDnsZoneId
     workspaceId: monitoring.outputs.workspaceId
     adminPassword: kv.getSecret('pg-admin-password')
+    opsPrincipalId: identities.outputs.github.principalId
   }
 }
 
@@ -236,5 +275,6 @@ output acrName string = acr.outputs.name
 output acrLoginServer string = acr.outputs.loginServer
 output postgresServerName string = 'psql-${prefix}-${suffix}'
 output githubClientId string = identities.outputs.github.clientId
+output githubInfraClientId string = identities.outputs.githubInfra.clientId
 output urls object = deployWorkloads ? apps!.outputs.urls : {}
 output apiGatewayUrl string = deployWorkloads ? apim!.outputs.gatewayUrl : ''
