@@ -1,0 +1,20 @@
+# gitleaks: default rules plus narrow allowlists for known false positives. Each allowlist
+# needs BOTH the path and the pattern to match, so real secrets in those files still fail.
+title = "CHASKI"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Built-in Azure role definition ids in Bicep (public GUIDs, not secrets)"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^infra/.*\.bicep$''']
+regexes = ['''^\s*var [A-Za-z]+ = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}''']
+
+[[allowlists]]
+description = "Idempotency keys used by the transfer tests"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^services/[a-z-]+/tests/.*\.py$''']
+regexes = ['''key="key-[a-z]+-[0-9]+"''']

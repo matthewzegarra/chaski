@@ -7,6 +7,7 @@
 // must not be able to grant permissions to itself.
 //   - subscription: custom role limited to deployments and the resource group
 //   - rg-chaski:    Owner (the Bicep creates role assignments and custom roles inside it)
+//   - subscription Activity log sent to the workspace (Sentinel)
 targetScope = 'subscription'
 
 param resourceGroupName string = 'rg-chaski'
@@ -54,4 +55,23 @@ module iacOnRg 'modules/rg-owner.bicep' = {
   scope: rg
   name: 'iac-rg-owner'
   params: { principalId: iacIdentity.properties.principalId }
+}
+
+// Subscription Activity log -> log-<prefix> (Sentinel rule "Nueva asignación de roles RBAC").
+// Subscription-level setting, so it belongs to the Owner bootstrap, not to the IaC pipeline.
+resource law 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = {
+  scope: rg
+  name: 'log-${prefix}'
+}
+
+resource activityLog 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  name: 'activity-to-${prefix}'
+  properties: {
+    workspaceId: law.id
+    logs: [
+      { category: 'Administrative', enabled: true }
+      { category: 'Security', enabled: true }
+      { category: 'Policy', enabled: true }
+    ]
+  }
 }

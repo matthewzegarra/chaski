@@ -1,0 +1,77 @@
+# Supply-chain and secret scanning for the whole repository (DevSecOps):
+#   gitleaks   secrets in the full git history (.gitleaks.toml: narrow allowlists)
+#   pip-audit  known vulnerabilities in the locked Python dependencies (uv.lock)
+#   pnpm audit known high/critical vulnerabilities in production npm dependencies
+# Runs on every PR and push and weekly, so new CVEs are caught even without code changes.
+name: security
+
+on:
+  pull_request:
+    branches: [develop, "release/**", main]
+  push:
+    branches: [develop, main]
+  schedule:
+    - cron: "0 11 * * 1" # Mondays 06:00 Lima
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  secrets:
+    name: gitleaks (git history)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Log in to ghcr.io (authenticated pulls; anonymous ones get 429)
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Scan
+        run: |
+          docker run --rm -v "${GITHUB_WORKSPACE}:/repo" ghcr.io/gitleaks/gitleaks:v8.30.0 \
+            git /repo --no-banner --redact --config /repo/.gitleaks.toml
+          echo "### 🔐 gitleaks: sin secretos en el historial" >> "$GITHUB_STEP_SUMMARY"
+
+  python-deps:
+    name: pip-audit (uv.lock)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.11.x"
+          python-version: "3.12"
+      - name: Audit locked dependencies
+        run: |
+          uv export --frozen --all-packages --no-hashes --no-emit-workspace -o requirements.txt
+          uvx pip-audit -r requirements.txt --progress-spinner off
+          echo "### 🐍 pip-audit: sin vulnerabilidades conocidas" >> "$GITHUB_STEP_SUMMARY"
+
+  node-deps:
+    name: pnpm audit (production)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Audit
+        run: |
+          npm install -g pnpm@12.3.4
+          pnpm audit --prod --audit-level high
+          echo "### 📦 pnpm audit: sin vulnerabilidades altas o críticas" >> "$GITHUB_STEP_SUMMARY"

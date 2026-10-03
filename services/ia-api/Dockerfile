@@ -42,6 +42,8 @@ RUN useradd --system --uid 10001 --no-create-home chaski
 COPY --from=builder /opt/venv /opt/venv
 # Versioned prompts (genai/prompts/*.md) are loaded at runtime and logged with their version.
 COPY genai/prompts /app/genai/prompts
+# Labelled evaluation datasets (python -m ia_api.evals, caj-ai-evals job).
+COPY genai/evals /app/genai/evals
 ENV PATH=/opt/venv/bin:$PATH PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
     SERVICE_NAME=ia-api PROMPTS_DIR=/app/genai/prompts
 USER 10001
