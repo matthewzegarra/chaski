@@ -28,6 +28,8 @@ param deployerUpn string
 param githubRepo string = 'Matthewzegarra0312/chaski'
 @description('Microsoft Sentinel on the workspace (31-day free trial).')
 param enableSentinel bool = true
+@description('Wire the read-only GitHub token (Key Vault github-readonly-token) into core-api.')
+param enableGithubToken bool = false
 @description('End of the Sentinel trial: after this date the template no longer onboards it (sentinel-offboard workflow removes it).')
 param sentinelTrialEnds string = '2026-11-01T00:00:00Z'
 param deploymentTime string = utcNow('yyyy-MM-ddTHH:mm:ssZ')
@@ -198,6 +200,7 @@ module apps 'modules/containerapps.bicep' = if (deployWorkloads) {
     blobEndpoint: storage.outputs.blobEndpoint
     githubRepo: githubRepo
     apiGatewayUrl: 'https://${apimName}.azure-api.net'
+    enableGithubToken: enableGithubToken
     dw: { server: sql!.outputs.fqdn, database: sql!.outputs.database }
     openAi: {
       endpoint: ai.outputs.openAiEndpoint
