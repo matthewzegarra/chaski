@@ -5,7 +5,8 @@
 #   workflow_dispatch on main .. what-if only, or what-if + deploy
 #
 # Runs as id-chaski-github-infra (environment `infra`, main only): Owner on rg-chaski and a
-# custom role at subscription level limited to deployments and the resource group.
+# custom role at subscription level limited to deployments and the resource group. Those
+# permissions come from infra/bootstrap.bicep, applied once by an Owner (not by this job).
 # The app pipelines use a different identity that cannot change the infrastructure.
 name: infra (Bicep)
 
@@ -44,6 +45,7 @@ jobs:
         run: |
           az bicep install
           az bicep build --file infra/main.bicep --stdout > /dev/null
+          az bicep build --file infra/bootstrap.bicep --stdout > /dev/null
           az bicep lint --file infra/main.bicep
           az bicep build-params --file infra/main.bicepparam --stdout > /dev/null
           echo "### ✅ Bicep válido (build + lint + parámetros)" >> "$GITHUB_STEP_SUMMARY"
