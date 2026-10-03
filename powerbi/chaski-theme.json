@@ -1,0 +1,13 @@
+{
+  "name": "CHASKI Interbank",
+  "dataColors": ["#00A94F", "#003B7A", "#4FC3F7", "#F59E0B", "#8E24AA", "#26A69A", "#EF5350", "#90A4AE"],
+  "background": "#FFFFFF",
+  "foreground": "#1F2937",
+  "tableAccent": "#00A94F",
+  "good": "#00A94F",
+  "neutral": "#F59E0B",
+  "bad": "#D32F2F",
+  "maximum": "#D32F2F",
+  "center": "#F59E0B",
+  "minimum": "#00A94F"
+}

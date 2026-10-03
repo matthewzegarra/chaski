@@ -1,0 +1,199 @@
+// =====================================================================
+// CHASKI Insights · Medidas DAX (nombres reales del DW: esquema dw)
+// Crear una tabla vacía "_Medidas" (Inicio > Especificar datos) y
+// agregar aquí todas las medidas. Formato sugerido entre corchetes.
+// =====================================================================
+
+
+// ---------------------------------------------------------------------
+// 0. COLUMNAS CALCULADAS EN dim_date (solo si no existen en el DW)
+// ---------------------------------------------------------------------
+// AñoMes  = FORMAT ( dim_date[date], "yyyy-mm" )
+// MesNum  = MONTH ( dim_date[date] )
+// Mes     = FORMAT ( dim_date[date], "mmm yyyy", "es-PE" )    -> ordenar por AñoMes
+
+
+// ---------------------------------------------------------------------
+// 1. RENTABILIDAD (Dirección) · fact_profitability_monthly
+// ---------------------------------------------------------------------
+Ingresos por Intereses = SUM ( fact_profitability_monthly[interest_income] )      // [S/ #,0]
+Comisiones = SUM ( fact_profitability_monthly[fees] )                             // [S/ #,0]
+Ingresos = [Ingresos por Intereses] + [Comisiones]                                // [S/ #,0]
+Costo de Fondeo = SUM ( fact_profitability_monthly[funding_cost] )                // [S/ #,0]
+Provisiones = SUM ( fact_profitability_monthly[provisions] )                      // [S/ #,0]
+Margen = SUM ( fact_profitability_monthly[margin] )                               // [S/ #,0]
+Margen % = DIVIDE ( [Margen], [Ingresos] )                                        // [0.0%]
+
+Margen Mes Anterior =
+CALCULATE ( [Margen], DATEADD ( dim_date[date], -1, MONTH ) )
+
+Var. Margen MoM % =
+DIVIDE ( [Margen] - [Margen Mes Anterior], ABS ( [Margen Mes Anterior] ) )        // [+0.0%;-0.0%]
+
+Margen YTD = TOTALYTD ( [Margen], dim_date[date] )                                // [S/ #,0]
+
+Producto Más Rentable =
+VAR _top = TOPN ( 1, VALUES ( dim_product[code] ), [Margen], DESC )
+RETURN CONCATENATEX ( _top, dim_product[code], ", " )
+
+
+// ---------------------------------------------------------------------
+// 2. CARTERA Y MOROSIDAD (Riesgos) · fact_portfolio_daily
+//    Es un SNAPSHOT diario: los saldos se leen en la fecha de corte
+//    (último día con datos dentro del filtro). Nunca sumar todos los días.
+// ---------------------------------------------------------------------
+Fecha de Corte =
+CALCULATE (
+    MAX ( fact_portfolio_daily[date] ),
+    REMOVEFILTERS ( dim_region ),
+    REMOVEFILTERS ( dim_delinquency_bucket )
+)
+
+Cartera Total =
+VAR _corte = [Fecha de Corte]
+RETURN
+    CALCULATE (
+        SUM ( fact_portfolio_daily[outstanding_balance] ),
+        fact_portfolio_daily[date] = _corte
+    )                                                                             // [S/ #,0]
+
+Cartera Vigente =
+VAR _corte = [Fecha de Corte]
+RETURN
+    CALCULATE (
+        SUM ( fact_portfolio_daily[outstanding_balance] ),
+        fact_portfolio_daily[date] = _corte,
+        fact_portfolio_daily[days_past_due] = 0
+    )                                                                             // [S/ #,0]
+
+Cartera Atrasada =
+VAR _corte = [Fecha de Corte]
+RETURN
+    CALCULATE (
+        SUM ( fact_portfolio_daily[outstanding_balance] ),
+        fact_portfolio_daily[date] = _corte,
+        fact_portfolio_daily[days_past_due] > 30
+    )                                                                             // [S/ #,0]
+
+Ratio Mora = DIVIDE ( [Cartera Atrasada], [Cartera Total] )                       // [0.0%]
+
+Cartera Alto Riesgo =
+VAR _corte = [Fecha de Corte]
+RETURN
+    CALCULATE (
+        SUM ( fact_portfolio_daily[outstanding_balance] ),
+        fact_portfolio_daily[date] = _corte,
+        KEEPFILTERS ( fact_portfolio_daily[bucket] IN { "Deficiente", "Dudoso", "Pérdida" } )
+    )
+
+Ratio Alto Riesgo = DIVIDE ( [Cartera Alto Riesgo], [Cartera Total] )             // [0.0%]
+
+Ratio Mora Mes Anterior =
+CALCULATE ( [Ratio Mora], DATEADD ( dim_date[date], -1, MONTH ) )
+
+Var. Mora (pb) = ( [Ratio Mora] - [Ratio Mora Mes Anterior] ) * 10000             // [+0;-0]
+
+Región con Mayor Mora =
+VAR _top = TOPN ( 1, VALUES ( dim_region[name] ), [Ratio Mora], DESC )
+RETURN CONCATENATEX ( _top, dim_region[name], ", " )
+
+Color Mora =
+VAR _r = [Ratio Mora]
+VAR _u = [Umbral Mora Valor]
+RETURN
+    SWITCH ( TRUE (),
+        _r > _u, "#D32F2F",
+        _r > _u * 0.75, "#F59E0B",
+        "#00A94F"
+    )
+// Formato condicional > Color de barras > Valor de campo > Color Mora
+
+Título Riesgos =
+"Morosidad de la cartera al " & FORMAT ( [Fecha de Corte], "dd/mm/yyyy" )
+
+
+// ---------------------------------------------------------------------
+// 3. CLIENTES (Marketing) · dim_customer (SCD2, filtrar is_current = 1)
+// ---------------------------------------------------------------------
+Clientes =
+CALCULATE ( COUNTROWS ( dim_customer ), dim_customer[is_current] = 1 )
+
+Clientes Acumulados =
+VAR _hasta = MAX ( dim_date[date] )
+RETURN
+    CALCULATE (
+        COUNTROWS ( dim_customer ),
+        dim_customer[is_current] = 1,
+        dim_customer[created_month] <= _hasta
+    )
+
+Clientes Nuevos (mes) =
+VAR _mes = DATE ( YEAR ( MAX ( dim_date[date] ) ), MONTH ( MAX ( dim_date[date] ) ), 1 )
+RETURN
+    CALCULATE (
+        COUNTROWS ( dim_customer ),
+        dim_customer[is_current] = 1,
+        dim_customer[created_month] = _mes
+    )
+
+Clientes con Préstamo =
+CALCULATE (
+    COUNTROWS ( dim_customer ),
+    dim_customer[is_current] = 1,
+    dim_customer[active_loans] > 0
+)
+
+Penetración Préstamos = DIVIDE ( [Clientes con Préstamo], [Clientes] )            // [0.0%]
+
+Margen por Cliente = DIVIDE ( [Margen], [Clientes] )                              // [S/ #,0.00]
+
+
+// ---------------------------------------------------------------------
+// 4. SIMULADOR DE DECISIONES
+//    Modelado > Nuevo parámetro > Rango numérico:
+//      Shock Mora      : 0    a 1     paso 0.05   predeterminado 0
+//      Variación Tasa  : -0.2 a 0.2   paso 0.02   predeterminado 0
+//      Umbral Mora     : 0.02 a 0.10  paso 0.005  predeterminado 0.05
+//      LGD             : 0.30 a 0.70  paso 0.05   predeterminado 0.45
+//    Power BI crea las medidas "... Valor". Si no, usar estas:
+// ---------------------------------------------------------------------
+Shock Mora Valor = SELECTEDVALUE ( 'Shock Mora'[Shock Mora], 0 )
+Variación Tasa Valor = SELECTEDVALUE ( 'Variación Tasa'[Variación Tasa], 0 )
+Umbral Mora Valor = SELECTEDVALUE ( 'Umbral Mora'[Umbral Mora], 0.05 )
+LGD Valor = SELECTEDVALUE ( 'LGD'[LGD], 0.45 )
+
+// Supuesto documentado: subir tasas eleva la mora con sensibilidad 0.5;
+// bajarlas no la reduce en el corto plazo (criterio conservador).
+Mora Simulada =
+[Ratio Mora]
+    * ( 1 + [Shock Mora Valor] )
+    * ( 1 + 0.5 * MAX ( 0, [Variación Tasa Valor] ) )                             // [0.0%]
+
+Pérdida Esperada Adicional =
+[Cartera Total] * MAX ( 0, [Mora Simulada] - [Ratio Mora] ) * [LGD Valor]         // [S/ #,0]
+
+Ingresos Intereses Simulados =
+[Ingresos por Intereses] * ( 1 + [Variación Tasa Valor] )
+
+// Usar con el filtro de UN mes (impacto mensual del escenario)
+Margen Simulado =
+[Margen]
+    + ( [Ingresos Intereses Simulados] - [Ingresos por Intereses] )
+    - [Pérdida Esperada Adicional]                                                // [S/ #,0]
+
+Var. Margen Simulado % =
+DIVIDE ( [Margen Simulado] - [Margen], ABS ( [Margen] ) )                         // [+0.0%;-0.0%]
+
+Regiones en Alerta =
+COUNTROWS ( FILTER ( VALUES ( dim_region[name] ), [Mora Simulada] > [Umbral Mora Valor] ) )
+
+Decisión Sugerida =
+VAR _alertas = [Regiones en Alerta]
+VAR _margenSim = DIVIDE ( [Margen Simulado], [Ingresos] )
+RETURN
+    SWITCH ( TRUE (),
+        _alertas >= 3, "Restringir originación en " & _alertas & " regiones y reforzar cobranza temprana",
+        _alertas >= 1, "Ajustar política de crédito en " & _alertas & " región(es) en alerta",
+        _margenSim < 0.15, "Revisar pricing: el margen simulado cae por debajo de 15%",
+        "Mantener estrategia y crecer colocaciones"
+    )
