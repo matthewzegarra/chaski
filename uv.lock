@@ -537,10 +537,10 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.48b0" },
     { name = "opentelemetry-instrumentation-sqlalchemy", specifier = ">=0.48b0" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.6" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.6" },
-    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.9" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.15.1" },
     { name = "sqlalchemy", specifier = ">=2.0.36" },
     { name = "structlog", specifier = ">=24.4" },
 ]
@@ -564,7 +564,7 @@ requires-dist = [
     { name = "chaski-common", editable = "libs/chaski_common" },
     { name = "faker", specifier = ">=30.0" },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.6" },
     { name = "sqlalchemy", specifier = ">=2.0.36" },
 ]
 
@@ -608,7 +608,7 @@ requires-dist = [
     { name = "email-validator", specifier = ">=2.2" },
     { name = "pyodbc", specifier = ">=5.2" },
     { name = "python-multipart", specifier = ">=0.0.12" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
 ]
 
 [[package]]
@@ -785,7 +785,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "chaski-common", editable = "libs/chaski_common" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
 ]
 
 [[package]]
@@ -973,7 +973,7 @@ requires-dist = [
     { name = "pyodbc", specifier = ">=5.2" },
     { name = "python-multipart", specifier = ">=0.0.12" },
     { name = "sqlglot", specifier = ">=30.21" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
 ]
 
 [[package]]

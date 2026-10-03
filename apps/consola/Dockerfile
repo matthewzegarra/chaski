@@ -15,7 +15,7 @@ COPY apps/consola apps/consola
 RUN pnpm --filter @chaski/consola build
 
 # ---------- serve with unprivileged nginx; env.js + CSP generated at start (D7, D32)
-FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.31-alpine AS runtime
 LABEL org.opencontainers.image.title="chaski-consola" \
       org.opencontainers.image.description="Interbank CHASKI - Chaski Control Center"
 COPY docker/web/nginx.conf /etc/nginx/conf.d/default.conf

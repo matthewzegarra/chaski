@@ -5,7 +5,7 @@ description = "Saldo, movimientos, transferencias y pagos con tarjeta."
 requires-python = ">=3.12"
 dependencies = [
   "chaski-common",
-  "uvicorn[standard]>=0.32",
+  "uvicorn[standard]>=0.54.0",
 ]
 
 [tool.uv.sources]
