@@ -56,6 +56,8 @@ const CHECK_LABELS: Record<string, string> = {
   dni_coincide: 'DNI',
   nombres_coinciden: 'Nombres',
   fecha_nacimiento_coincide: 'Nacimiento',
+  consulta_nombres_coinciden: 'Consulta vs datos',
+  consulta_ocr_coinciden: 'Consulta vs DNI',
 }
 
 function CheckBadge({ label, value }: { label: string; value: boolean | null }) {
@@ -489,6 +491,12 @@ function OnboardingInbox() {
                 </dl>
               ) : (
                 <Alert variant="info">La IA no pudo leer el DNI: valida la foto manualmente.</Alert>
+              )}
+              {item.lookup && (
+                <p className="text-xs text-muted-foreground">
+                  Consulta de identidad ({item.lookup.fuente}): {item.lookup.nombres}{' '}
+                  {item.lookup.apellidos}
+                </p>
               )}
               <div className="flex flex-wrap gap-1.5">
                 {Object.entries(item.checks).map(([key, v]) => (

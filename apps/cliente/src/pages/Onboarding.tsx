@@ -8,8 +8,10 @@ import {
   Field,
   Input,
   Logo,
+  type DniLookup,
   type OnboardingResult,
   Select,
+  toast,
   useApi,
   useAuth,
 } from '@chaski/shared'
@@ -70,6 +72,8 @@ const CHECK_LABELS: Record<string, string> = {
   dni_coincide: 'Número de DNI',
   nombres_coinciden: 'Nombres y apellidos',
   fecha_nacimiento_coincide: 'Fecha de nacimiento',
+  consulta_nombres_coinciden: 'Consulta de identidad',
+  consulta_ocr_coinciden: 'Consulta vs foto del DNI',
 }
 
 function CheckIcon({ value }: { value: boolean | null }) {
@@ -90,11 +94,44 @@ export function OnboardingPage() {
   const [photo, setPhoto] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [looking, setLooking] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<OnboardingResult | null>(null)
 
   const set = (k: keyof PersonalData) => (e: { target: { value: string } }) =>
     setData((d) => ({ ...d, [k]: e.target.value }))
+
+  async function consultarDni() {
+    if (!/^\d{8}$/.test(data.document_number)) {
+      setErrors((e) => ({ ...e, document_number: 'El DNI tiene 8 dígitos' }))
+      return
+    }
+    setLooking(true)
+    try {
+      const res = await api.request<DniLookup>(
+        'core',
+        `/onboarding/lookup-dni/${data.document_number}`,
+        { auth: false },
+      )
+      if (!res.available || !res.found || !res.nombres || !res.apellidos) {
+        toast.warning('No salieron nombres para ese DNI. Escríbelos tú y continúa.')
+        return
+      }
+      setData((d) => ({ ...d, first_name: res.nombres!, last_name: res.apellidos! }))
+      setErrors((e) => {
+        const next = { ...e }
+        delete next.first_name
+        delete next.last_name
+        delete next.document_number
+        return next
+      })
+      toast.success('Datos encontrados. Confirma que nombres y apellidos sean los tuyos.')
+    } catch {
+      toast.warning('No pudimos consultar el DNI. Escríbelos tú y continúa.')
+    } finally {
+      setLooking(false)
+    }
+  }
 
   function next(e: FormEvent) {
     e.preventDefault()
@@ -174,6 +211,33 @@ export function OnboardingPage() {
       {step === 0 && (
         <form onSubmit={next} className="flex flex-col gap-3" noValidate>
           <h1 className="text-xl font-bold">Abre tu cuenta Chaski</h1>
+          <Field
+            label="DNI"
+            error={errors.document_number}
+            hint="Consultar es opcional. Si no aparecen nombres y apellidos, escríbelos tú."
+          >
+            {(p) => (
+              <div className="flex gap-2">
+                <Input
+                  {...p}
+                  className="flex-1"
+                  value={data.document_number}
+                  onChange={set('document_number')}
+                  inputMode="numeric"
+                  maxLength={8}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void consultarDni()}
+                  disabled={data.document_number.length !== 8}
+                  loading={looking}
+                >
+                  Consultar
+                </Button>
+              </div>
+            )}
+          </Field>
           <Field label="Nombres" error={errors.first_name}>
             {(p) => (
               <Input
@@ -191,17 +255,6 @@ export function OnboardingPage() {
                 value={data.last_name}
                 onChange={set('last_name')}
                 autoComplete="family-name"
-              />
-            )}
-          </Field>
-          <Field label="DNI" error={errors.document_number}>
-            {(p) => (
-              <Input
-                {...p}
-                value={data.document_number}
-                onChange={set('document_number')}
-                inputMode="numeric"
-                maxLength={8}
               />
             )}
           </Field>
@@ -252,6 +305,7 @@ export function OnboardingPage() {
               />
             )}
           </Field>
+          {error && <Alert variant="danger">{error}</Alert>}
           <Button type="submit" size="lg" className="mt-2">
             Continuar
           </Button>
@@ -302,6 +356,12 @@ export function OnboardingPage() {
       {step === 2 && result && (
         <div className="flex flex-col gap-4">
           <h1 className="text-xl font-bold">Confirma tus datos</h1>
+          {result.lookup && (
+            <p className="text-sm text-muted-foreground">
+              Consulta de identidad ({result.lookup.fuente}): {result.lookup.nombres}{' '}
+              {result.lookup.apellidos}
+            </p>
+          )}
           {result.extracted ? (
             <Card>
               <CardContent className="pt-4">

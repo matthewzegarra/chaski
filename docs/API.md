@@ -86,7 +86,8 @@ Clientes, onboarding/KYC, tarjetas, préstamos, quejas, fraude, operación, pipe
 
 | Método | Ruta | Descripción | Roles |
 |---|---|---|---|
-| `POST` | `/onboarding` | Alta digital (multipart: datos + foto del DNI); extrae datos con ia-api y crea el cliente `PENDIENTE` | Público |
+| `POST` | `/onboarding` | Alta digital (multipart: datos + foto del DNI); extrae datos con ia-api, consulta DNI y crea el cliente `PENDIENTE` | Público |
+| `GET` | `/onboarding/lookup-dni/{dni}` | Consulta de identidad por DNI (ApisPeru o mock); rellena nombres y apellidos. Público, con rate limit | Público |
 | `GET` | `/onboarding/pending` | Bandeja KYC: solicitudes pendientes con datos extraídos, confianza y validaciones cruzadas | Admin, Atencion |
 | `POST` | `/onboarding/{customer_id}/decision` | Aprueba (abre cuenta y tarjeta) o rechaza un onboarding | Admin, Atencion |
 

@@ -17,6 +17,8 @@ def _core_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]
     from core_api.settings import get_settings
 
     monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "uploads"))
+    monkeypatch.setenv("DNI_LOOKUP_MODE", "mock")
+    monkeypatch.setenv("DNI_LOOKUP_TOKEN", "")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
