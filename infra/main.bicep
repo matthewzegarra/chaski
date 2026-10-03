@@ -26,6 +26,11 @@ param deployerObjectId string
 param deployerUpn string
 
 param githubRepo string = 'Matthewzegarra0312/chaski'
+@description('Microsoft Sentinel on the workspace (31-day free trial).')
+param enableSentinel bool = true
+@description('End of the Sentinel trial: after this date the template no longer onboards it (sentinel-offboard workflow removes it).')
+param sentinelTrialEnds string = '2026-11-01T00:00:00Z'
+param deploymentTime string = utcNow('yyyy-MM-ddTHH:mm:ssZ')
 @description('GitHub OIDC subject prefix (this repo uses immutable owner/repo ids).')
 param githubSubjectPrefix string = 'repo:Matthewzegarra0312@119908185/chaski@1401839661'
 @description('Entra ID values from infra/entra/.out/entra.json (identity tenant).')
@@ -193,6 +198,7 @@ module apps 'modules/containerapps.bicep' = if (deployWorkloads) {
     blobEndpoint: storage.outputs.blobEndpoint
     githubRepo: githubRepo
     apiGatewayUrl: 'https://${apimName}.azure-api.net'
+    dw: { server: sql!.outputs.fqdn, database: sql!.outputs.database }
     openAi: {
       endpoint: ai.outputs.openAiEndpoint
       deployment: ai.outputs.openAiDeployment
@@ -232,6 +238,25 @@ module alerts 'modules/alerts.bicep' = if (deployWorkloads) {
     appInsightsId: monitoring.outputs.appInsightsId
     workspaceId: monitoring.outputs.workspaceId
   }
+}
+
+var sentinelActive = enableSentinel && dateTimeToEpoch(deploymentTime) < dateTimeToEpoch(sentinelTrialEnds)
+
+module sentinel 'modules/sentinel.bicep' = if (deployWorkloads && sentinelActive) {
+  scope: rg
+  name: 'sentinel'
+  params: {
+    tags: tags
+    workspaceName: 'log-${prefix}'
+    allowedSecretReaders: [
+      identities.outputs.identities.cuentas.principalId
+      identities.outputs.identities.core.principalId
+      identities.outputs.identities.ia.principalId
+      identities.outputs.identities.pipeline.principalId
+      deployerObjectId
+    ]
+  }
+  dependsOn: [ monitoring ]
 }
 
 output resourceGroup string = rg.name

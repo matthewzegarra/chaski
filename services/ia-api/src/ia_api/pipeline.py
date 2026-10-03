@@ -105,6 +105,7 @@ def run_structured[T: BaseModel](
     shield_text: str | None = None,
     confidence_field: str | None = None,
     extra_log: dict[str, Any] | None = None,
+    schema_name: str | None = None,
 ) -> Outcome[T]:
     """Runs one structured completion through the full pipeline.
 
@@ -129,7 +130,10 @@ def run_structured[T: BaseModel](
     llm = get_llm()
     try:
         result = llm.complete_json(
-            system=prompt.text, user=redacted, schema=strict_schema(model), schema_name=use_case
+            system=prompt.text,
+            user=redacted,
+            schema=strict_schema(model),
+            schema_name=schema_name or use_case,
         )
         parsed = model.model_validate(json.loads(result.content or "{}"))
     except (ValidationError, json.JSONDecodeError) as exc:

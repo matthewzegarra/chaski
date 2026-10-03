@@ -12,13 +12,15 @@
   -Stage 2        PostgreSQL, Azure SQL, Container Apps (+ jobs) and API Management.
   -Stage bootstrap Permissions of the GitHub IaC identity (infra/bootstrap.bicep). Run once,
                   as an Owner, after stage 2; from then on infra.yml applies main.bicep.
+  -Stage dwusers   Azure SQL users of the managed identities (infra/scripts/dw_users.py).
+                  Run once as the SQL Entra admin (Entra-only authentication).
 
   Uses the default Azure CLI profile (UTP account). Refuses to run against any other
   subscription, so nothing can ever land on the personal pay-as-you-go subscription.
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('whatif1', '1', 'seed', 'whatif2', '2', 'bootstrap')][string]$Stage,
+    [Parameter(Mandatory)][ValidateSet('whatif1', '1', 'seed', 'whatif2', '2', 'bootstrap', 'dwusers')][string]$Stage,
     [string]$SubscriptionName = 'Azure for Students',
     [string]$Location = 'westus',
     [switch]$RealImages,
@@ -80,6 +82,16 @@ switch ($Stage) {
     '1'       { Invoke-Az deployment sub create --name chaski-stage1 @common '--parameters' 'deployWorkloads=false' | Out-Null; Get-Outputs | ConvertTo-Json -Depth 5 }
     'whatif2' { & $az deployment sub what-if --name chaski-stage2 @common '--parameters' 'deployWorkloads=true' }
     'bootstrap' { Invoke-Az deployment sub create --name chaski-bootstrap --location $Location --template-file (Join-Path $infra 'bootstrap.bicep') | Out-Null; 'bootstrap: Succeeded' }
+    'dwusers' {
+        $sql = Invoke-Az sql server list -g rg-chaski --query "[0].{fqdn:fullyQualifiedDomainName}"
+        $ids = @{}
+        foreach ($n in 'id-chaski-pipeline', 'id-chaski-core', 'id-chaski-ia') {
+            $ids[$n] = (Invoke-Az identity show -g rg-chaski -n $n).principalId
+        }
+        $token = (Invoke-Az account get-access-token --resource https://database.windows.net/).accessToken
+        uv run python (Join-Path $PSScriptRoot 'dw_users.py') $sql.fqdn 'sqldb-chaski-dw' $token ($ids | ConvertTo-Json -Compress)
+        if ($LASTEXITCODE -ne 0) { throw 'dw_users.py failed' }
+    }
     '2'       { $r = Invoke-Az deployment sub create --name chaski-stage2 @common '--parameters' 'deployWorkloads=true'; $r.properties.outputs | ConvertTo-Json -Depth 5 }
     'seed' {
         $o = Get-Outputs
