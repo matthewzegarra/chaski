@@ -10,13 +10,15 @@
                   (random values, never printed, never written to the repo).
   -Stage whatif2  Preview stage 2 (needs the seeded secrets).
   -Stage 2        PostgreSQL, Azure SQL, Container Apps (+ jobs) and API Management.
+  -Stage bootstrap Permissions of the GitHub IaC identity (infra/bootstrap.bicep). Run once,
+                  as an Owner, after stage 2; from then on infra.yml applies main.bicep.
 
   Uses the default Azure CLI profile (UTP account). Refuses to run against any other
   subscription, so nothing can ever land on the personal pay-as-you-go subscription.
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('whatif1', '1', 'seed', 'whatif2', '2')][string]$Stage,
+    [Parameter(Mandatory)][ValidateSet('whatif1', '1', 'seed', 'whatif2', '2', 'bootstrap')][string]$Stage,
     [string]$SubscriptionName = 'Azure for Students',
     [string]$Location = 'westus',
     [switch]$RealImages,
@@ -77,6 +79,7 @@ switch ($Stage) {
     'whatif1' { & $az deployment sub what-if --name chaski-stage1 @common '--parameters' 'deployWorkloads=false' }
     '1'       { Invoke-Az deployment sub create --name chaski-stage1 @common '--parameters' 'deployWorkloads=false' | Out-Null; Get-Outputs | ConvertTo-Json -Depth 5 }
     'whatif2' { & $az deployment sub what-if --name chaski-stage2 @common '--parameters' 'deployWorkloads=true' }
+    'bootstrap' { Invoke-Az deployment sub create --name chaski-bootstrap --location $Location --template-file (Join-Path $infra 'bootstrap.bicep') | Out-Null; 'bootstrap: Succeeded' }
     '2'       { $r = Invoke-Az deployment sub create --name chaski-stage2 @common '--parameters' 'deployWorkloads=true'; $r.properties.outputs | ConvertTo-Json -Depth 5 }
     'seed' {
         $o = Get-Outputs
