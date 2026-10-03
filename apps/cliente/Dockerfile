@@ -15,7 +15,7 @@ COPY apps/cliente apps/cliente
 RUN pnpm --filter @chaski/cliente build
 
 # ---------- serve with unprivileged nginx; env.js + CSP generated at start (D7, D32)
-FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.31-alpine AS runtime
 LABEL org.opencontainers.image.title="chaski-cliente" \
       org.opencontainers.image.description="Interbank CHASKI - Chaski App (PWA)"
 COPY docker/web/nginx.conf /etc/nginx/conf.d/default.conf
