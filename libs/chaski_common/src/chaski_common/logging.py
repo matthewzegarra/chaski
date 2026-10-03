@@ -70,6 +70,19 @@ class RedactingFilter(logging.Filter):
         return True
 
 
+NOISY_LOGGERS = (
+    "azure",
+    "azure.core.pipeline.policies.http_logging_policy",
+    "azure.identity",
+    "azure.monitor.opentelemetry.exporter",
+    "httpx",
+    "httpx2",
+    "httpcore",
+    "urllib3",
+    "opentelemetry",
+)
+
+
 def configure_logging(service_name: str, level: str = "INFO") -> None:
     shared: list[Any] = [
         structlog.contextvars.merge_contextvars,
@@ -105,6 +118,11 @@ def configure_logging(service_name: str, level: str = "INFO") -> None:
         lg.propagate = True
     # We emit our own structured access log from the middleware.
     logging.getLogger("uvicorn.access").disabled = True
+    # Azure SDK and HTTP client internals log every request at INFO (and the telemetry
+    # exporter logs its own exports): that noise filled the Log Analytics daily cap and
+    # would blind alerts and Sentinel. Only warnings and errors from them are kept.
+    for name in NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
     structlog.contextvars.bind_contextvars(service=service_name)
 
 

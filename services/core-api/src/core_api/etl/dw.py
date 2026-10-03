@@ -185,10 +185,32 @@ def connect(server: str, database: str) -> Any:
             time.sleep(20)  # serverless resume
 
 
+def _input_sizes(cur: Any, columns: tuple[str, ...]) -> list[Any]:
+    """Exact parameter types read from #stage. pyodbc cannot describe parameters of a temp
+    table, so fast_executemany would otherwise infer them from the first row and fail on a
+    later, longer value ('Converting decimal loses precision' / right truncation)."""
+    import pyodbc
+
+    cols = ", ".join(_q(c) for c in columns)
+    cur.execute(f"SELECT TOP 0 {cols} FROM #stage")  # noqa: S608
+    sizes: list[Any] = []
+    for _name, type_code, _display, internal, precision, scale, _null in cur.description:
+        if type_code is Decimal:
+            sizes.append((pyodbc.SQL_DECIMAL, precision, scale))
+        elif type_code is str:
+            sizes.append((pyodbc.SQL_WVARCHAR, internal or 0, 0))
+        else:
+            sizes.append(None)
+    cur.fetchall()
+    return sizes
+
+
 def _load(cur: Any, columns: tuple[str, ...], rows: list[tuple[Any, ...]]) -> None:
     placeholders = ", ".join("?" for _ in columns)
     cols = ", ".join(_q(c) for c in columns)
+    sizes = _input_sizes(cur, columns)
     cur.fast_executemany = True
+    cur.setinputsizes(sizes)
     cur.executemany(f"INSERT INTO #stage ({cols}) VALUES ({placeholders})", rows)  # noqa: S608
 
 
