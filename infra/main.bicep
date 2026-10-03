@@ -46,6 +46,7 @@ resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
 // Globally unique, stable per subscription + resource group.
 var suffix = take(uniqueString(subscription().id, resourceGroupName), 6)
 var kvName = 'kv-${prefix}-${suffix}'
+var apimName = 'apim-${prefix}-${suffix}'
 
 module network 'modules/network.bicep' = {
   scope: rg
@@ -187,6 +188,7 @@ module apps 'modules/containerapps.bicep' = if (deployWorkloads) {
     entra: entra
     blobEndpoint: storage.outputs.blobEndpoint
     githubRepo: githubRepo
+    apiGatewayUrl: 'https://${apimName}.azure-api.net'
     openAi: {
       endpoint: ai.outputs.openAiEndpoint
       deployment: ai.outputs.openAiDeployment
@@ -203,8 +205,16 @@ module apim 'modules/apim.bicep' = if (deployWorkloads) {
   params: {
     location: location
     tags: tags
-    name: 'apim-${prefix}-${suffix}'
+    name: apimName
     publisherEmail: deployerUpn
+    backends: {
+      cuentas: apps!.outputs.urls.cuentasDev
+      core: apps!.outputs.urls.core
+      ia: apps!.outputs.urls.ia
+    }
+    entraTenantId: entra.tenantId
+    entraAudience: entra.audience
+    workspaceId: monitoring.outputs.workspaceId
   }
 }
 
@@ -215,3 +225,4 @@ output acrLoginServer string = acr.outputs.loginServer
 output postgresServerName string = 'psql-${prefix}-${suffix}'
 output githubClientId string = identities.outputs.github.clientId
 output urls object = deployWorkloads ? apps!.outputs.urls : {}
+output apiGatewayUrl string = deployWorkloads ? apim!.outputs.gatewayUrl : ''

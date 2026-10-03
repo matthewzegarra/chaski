@@ -1,0 +1,54 @@
+<!--
+  CHASKI gateway policy, applied to every API (cuentas, core, ia).
+  - Correlation id for end-to-end tracing (kept if the client sent one).
+  - Entra ID JWT validation (signature via OpenID metadata, audience, v2 issuer) except for
+    public routes: CORS preflight, health probes, anonymous onboarding and the HMAC-signed
+    fraud webhook. The APIs validate the token again and enforce roles (defense in depth).
+  Placeholders {tenant} and {audience} are replaced by apim.bicep.
+-->
+<policies>
+  <inbound>
+    <base />
+    <set-header name="X-Correlation-ID" exists-action="skip">
+      <value>@(context.RequestId.ToString())</value>
+    </set-header>
+    <!-- rate-limit-by-key is not available in the Consumption tier; per-IP rate limiting is
+         enforced by every API (RATE_LIMIT_PER_MINUTE). With Developer/Standard tiers add:
+         <rate-limit-by-key calls="300" renewal-period="60" counter-key="@(context.Request.IpAddress)" /> -->
+    <choose>
+      <when condition="@{
+          var path = context.Request.Url.Path.ToLowerInvariant();
+          var method = context.Request.Method;
+          return method == &quot;OPTIONS&quot;
+              || path.EndsWith(&quot;/health&quot;)
+              || path.EndsWith(&quot;/ready&quot;)
+              || path.EndsWith(&quot;/api/v1/fraud/webhook&quot;)
+              || (method == &quot;POST&quot; &amp;&amp; path.EndsWith(&quot;/api/v1/onboarding&quot;));
+        }">
+      </when>
+      <otherwise>
+        <validate-jwt header-name="Authorization" require-scheme="Bearer" failed-validation-httpcode="401" failed-validation-error-message="Token ausente o inválido">
+          <openid-config url="https://login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration" />
+          <audiences>
+            <audience>{audience}</audience>
+          </audiences>
+          <issuers>
+            <issuer>https://login.microsoftonline.com/{tenant}/v2.0</issuer>
+          </issuers>
+        </validate-jwt>
+      </otherwise>
+    </choose>
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+    <set-header name="X-Correlation-ID" exists-action="skip">
+      <value>@(context.RequestId.ToString())</value>
+    </set-header>
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

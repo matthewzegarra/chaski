@@ -21,6 +21,8 @@ param entra object
 param blobEndpoint string
 param openAi object
 param githubRepo string
+@description('API Management gateway URL; when set, the web apps call the APIs only through it.')
+param apiGatewayUrl string = ''
 
 var placeholderImage = 'mcr.microsoft.com/k8se/quickstart:latest'
 var contributor = 'b24988ac-6180-42a0-ab88-20f7382dd24c'
@@ -49,6 +51,7 @@ resource diag 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
 
 var domain = cae.properties.defaultDomain
 var publicUrl = { cuentas: 'https://ca-cuentas-dev.${domain}', core: 'https://ca-core.${domain}', ia: 'https://ca-ia.${domain}' }
+var webApiUrl = empty(apiGatewayUrl) ? publicUrl : { cuentas: '${apiGatewayUrl}/cuentas', core: '${apiGatewayUrl}/core', ia: '${apiGatewayUrl}/ia' }
 var allowedOrigins = 'https://ca-cliente.${domain},https://ca-consola.${domain}'
 
 var commonEnv = [
@@ -207,9 +210,9 @@ resource webApps 'Microsoft.App/containerApps@2024-03-01' = [for w in webs: {
           env: [
             { name: 'CHASKI_AUTH_MODE', value: 'entra' }
             { name: 'CHASKI_ENV', value: 'DEV' }
-            { name: 'CHASKI_CUENTAS_API_URL', value: publicUrl.cuentas }
-            { name: 'CHASKI_CORE_API_URL', value: publicUrl.core }
-            { name: 'CHASKI_IA_API_URL', value: publicUrl.ia }
+            { name: 'CHASKI_CUENTAS_API_URL', value: webApiUrl.cuentas }
+            { name: 'CHASKI_CORE_API_URL', value: webApiUrl.core }
+            { name: 'CHASKI_IA_API_URL', value: webApiUrl.ia }
             { name: 'CHASKI_ENTRA_CLIENT_ID', value: w.clientId }
             { name: 'CHASKI_ENTRA_TENANT_ID', value: entra.tenantId }
             { name: 'CHASKI_ENTRA_API_SCOPE', value: entra.apiScope }
