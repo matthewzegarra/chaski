@@ -193,6 +193,7 @@ module apps 'modules/containerapps.bicep' = if (deployWorkloads) {
     blobEndpoint: storage.outputs.blobEndpoint
     githubRepo: githubRepo
     apiGatewayUrl: 'https://${apimName}.azure-api.net'
+    dw: { server: sql!.outputs.fqdn, database: sql!.outputs.database }
     openAi: {
       endpoint: ai.outputs.openAiEndpoint
       deployment: ai.outputs.openAiDeployment
