@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 import pytest
-from chaski_common.models import FraudAlert, Loan, QuarantineRecord
+from chaski_common.models import FraudAlert, Loan, PipelineRun, QuarantineRecord
 from chaski_common.roles import Role
 from chaski_common.testing import headers, make_account, make_customer, make_tx
 from fastapi.testclient import TestClient
@@ -62,6 +63,24 @@ def test_bad_record_goes_to_quarantine(client: TestClient, s: Session) -> None:
     second = client.post("/api/v1/ops/pipelines/run", headers=admin).json()["run"]
     assert second["status"] == "EXITOSO" and second["rows_quarantined"] == 0
     assert s.scalar(select(QuarantineRecord.reason)).startswith("Falló:")
+
+
+def test_pipeline_job_entry_point_records_run_and_exports_quarantine(
+    client: TestClient, s: Session, monkeypatch: Any
+) -> None:
+    from core_api import pipeline_job
+
+    make_account(s, make_customer(s))
+    client.post("/api/v1/demo/inject-bad-record", headers=headers(Role.ADMIN))
+    exported: list[Any] = []
+    monkeypatch.setenv("PIPELINE_TRIGGER", "PROGRAMADO")
+    monkeypatch.setattr(pipeline_job, "_export_quarantine", lambda run, rows: exported.append(rows))
+
+    assert pipeline_job.main() == 0
+    runs = client.get("/api/v1/ops/pipelines", headers=headers(Role.TI)).json()
+    assert len(runs) == 1 and runs[0]["status"] == "CON_ALERTAS"
+    assert s.scalar(select(PipelineRun.trigger)) == "PROGRAMADO"
+    assert len(exported[0]) == 1 and exported[0][0]["payload"]["currency"] == "XXX"
 
 
 def test_pipeline_permissions(client: TestClient, s: Session) -> None:

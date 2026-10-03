@@ -1,7 +1,8 @@
 name: Deploy to Azure Container Apps with smoke test and rollback
 description: >-
-  Updates a Container App to a new image, smoke-tests /health and /ready on its public FQDN
-  and, if the smoke test fails, redeploys the previous image and fails the job.
+  Updates a Container App to a new image, smoke-tests it on its public FQDN (by default
+  /health and /ready) and, if the smoke test fails, redeploys the previous image and fails
+  the job.
   Requires a prior azure/login (OIDC).
 
 inputs:
@@ -20,6 +21,14 @@ inputs:
   environment:
     description: Environment label for the summary (DEV/TEST/PROD)
     required: true
+  smoke-paths:
+    description: Space-separated paths that must answer 200 (web apps use "/ /env.js")
+    required: false
+    default: "/health /ready"
+  service:
+    description: Service name for the summary title
+    required: false
+    default: cuentas-api
   smoke-timeout-seconds:
     description: Total time allowed for the app to answer (scale-to-zero cold start)
     required: false
@@ -45,6 +54,8 @@ runs:
         SUFFIX: ${{ inputs.revision-suffix }}
         ENV_LABEL: ${{ inputs.environment }}
         SMOKE_TIMEOUT: ${{ inputs.smoke-timeout-seconds }}
+        SMOKE_PATHS: ${{ inputs.smoke-paths }}
+        SERVICE: ${{ inputs.service }}
       run: |
         set -euo pipefail
 
@@ -59,7 +70,7 @@ runs:
 
         smoke() {
           local deadline=$((SECONDS + SMOKE_TIMEOUT))
-          for path in /health /ready; do
+          for path in ${SMOKE_PATHS}; do
             until curl -fsS --max-time 10 "${url}${path}" >/dev/null; do
               if (( SECONDS >= deadline )); then
                 echo "::error::Smoke test failed: ${url}${path} did not answer 200 within ${SMOKE_TIMEOUT}s"
@@ -75,7 +86,7 @@ runs:
         }
 
         if smoke; then
-          result="✅ Smoke test OK (/health y /ready)"
+          result="✅ Smoke test OK (${SMOKE_PATHS})"
           status=0
         else
           echo "::warning::Rolling back ${APP} to ${previous}"
@@ -86,7 +97,7 @@ runs:
 
         revision="$(az containerapp show -g "$RG" -n "$APP" --query 'properties.latestRevisionName' -o tsv)"
         {
-          echo "## Deploy cuentas-api · ${ENV_LABEL}"
+          echo "## Deploy ${SERVICE} · ${ENV_LABEL}"
           echo
           echo "| Campo | Valor |"
           echo "|---|---|"

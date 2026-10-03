@@ -1,0 +1,106 @@
+# Infrastructure as code: validates the Bicep on every PR and applies it from GitHub.
+#
+#   PR touching infra/ ......... bicep build + lint + parameters (no credentials)
+#   push main (infra/ changed) . what-if + deploy to rg-chaski
+#   workflow_dispatch on main .. what-if only, or what-if + deploy
+#
+# Runs as id-chaski-github-infra (environment `infra`, main only): Owner on rg-chaski and a
+# custom role at subscription level limited to deployments and the resource group.
+# The app pipelines use a different identity that cannot change the infrastructure.
+name: infra (Bicep)
+
+on:
+  pull_request:
+    branches: [develop, "release/**", main]
+    paths: &infra_paths
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+  push:
+    branches: [main]
+    paths: *infra_paths
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: what-if only, or what-if and deploy
+        type: choice
+        options: [what-if, deploy]
+        default: what-if
+
+permissions:
+  contents: read
+
+concurrency:
+  group: infra-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate Bicep
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build and lint (warnings are shown in the log)
+        run: |
+          az bicep install
+          az bicep build --file infra/main.bicep --stdout > /dev/null
+          az bicep lint --file infra/main.bicep
+          az bicep build-params --file infra/main.bicepparam --stdout > /dev/null
+          echo "### ✅ Bicep válido (build + lint + parámetros)" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: What-if and deploy
+    needs: validate
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: infra
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      # Same parameters as infra/scripts/deploy.ps1 -Stage 2 -RealImages -AiMode azure.
+      DEPLOY_ARGS: >-
+        --location westus
+        --template-file infra/main.bicep
+        --parameters infra/main.bicepparam
+        --parameters deployWorkloads=true usePlaceholderImages=false imageTag=dev aiMode=azure
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Azure login (OIDC, IaC identity)
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: What-if
+        env:
+          ADMIN_IP: ${{ vars.INFRA_ADMIN_IP }}
+          ADMIN_OID: ${{ vars.INFRA_ADMIN_OBJECT_ID }}
+          ADMIN_UPN: ${{ vars.INFRA_ADMIN_UPN }}
+        run: |
+          # shellcheck disable=SC2086
+          az deployment sub what-if --name "chaski-ci-${GITHUB_RUN_NUMBER}" $DEPLOY_ARGS \
+            --parameters deployerIp="$ADMIN_IP" deployerObjectId="$ADMIN_OID" deployerUpn="$ADMIN_UPN" \
+            --result-format ResourceIdOnly --no-pretty-print > whatif.txt || { cat whatif.txt; exit 1; }
+          {
+            echo "## What-if de la infraestructura"
+            echo '```'
+            cat whatif.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy
+        if: github.event_name == 'push' || inputs.mode == 'deploy'
+        env:
+          ADMIN_IP: ${{ vars.INFRA_ADMIN_IP }}
+          ADMIN_OID: ${{ vars.INFRA_ADMIN_OBJECT_ID }}
+          ADMIN_UPN: ${{ vars.INFRA_ADMIN_UPN }}
+        run: |
+          # shellcheck disable=SC2086
+          az deployment sub create --name "chaski-ci-${GITHUB_RUN_NUMBER}" $DEPLOY_ARGS \
+            --parameters deployerIp="$ADMIN_IP" deployerObjectId="$ADMIN_OID" deployerUpn="$ADMIN_UPN" \
+            --query "properties.provisioningState" -o tsv
+          echo "### ✅ Infraestructura aplicada (deployment chaski-ci-${GITHUB_RUN_NUMBER})" >> "$GITHUB_STEP_SUMMARY"

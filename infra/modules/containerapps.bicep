@@ -21,6 +21,8 @@ param entra object
 param blobEndpoint string
 param openAi object
 param githubRepo string
+@description('API Management gateway URL; when set, the web apps call the APIs only through it.')
+param apiGatewayUrl string = ''
 
 var placeholderImage = 'mcr.microsoft.com/k8se/quickstart:latest'
 var contributor = 'b24988ac-6180-42a0-ab88-20f7382dd24c'
@@ -49,6 +51,7 @@ resource diag 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
 
 var domain = cae.properties.defaultDomain
 var publicUrl = { cuentas: 'https://ca-cuentas-dev.${domain}', core: 'https://ca-core.${domain}', ia: 'https://ca-ia.${domain}' }
+var webApiUrl = empty(apiGatewayUrl) ? publicUrl : { cuentas: '${apiGatewayUrl}/cuentas', core: '${apiGatewayUrl}/core', ia: '${apiGatewayUrl}/ia' }
 var allowedOrigins = 'https://ca-cliente.${domain},https://ca-consola.${domain}'
 
 var commonEnv = [
@@ -207,9 +210,9 @@ resource webApps 'Microsoft.App/containerApps@2024-03-01' = [for w in webs: {
           env: [
             { name: 'CHASKI_AUTH_MODE', value: 'entra' }
             { name: 'CHASKI_ENV', value: 'DEV' }
-            { name: 'CHASKI_CUENTAS_API_URL', value: publicUrl.cuentas }
-            { name: 'CHASKI_CORE_API_URL', value: publicUrl.core }
-            { name: 'CHASKI_IA_API_URL', value: publicUrl.ia }
+            { name: 'CHASKI_CUENTAS_API_URL', value: webApiUrl.cuentas }
+            { name: 'CHASKI_CORE_API_URL', value: webApiUrl.core }
+            { name: 'CHASKI_IA_API_URL', value: webApiUrl.ia }
             { name: 'CHASKI_ENTRA_CLIENT_ID', value: w.clientId }
             { name: 'CHASKI_ENTRA_TENANT_ID', value: entra.tenantId }
             { name: 'CHASKI_ENTRA_API_SCOPE', value: entra.apiScope }
@@ -221,11 +224,20 @@ resource webApps 'Microsoft.App/containerApps@2024-03-01' = [for w in webs: {
   }
 }]
 
-// Jobs: database migrations + seed (manual) and the data pipeline (manual for now;
-// the nightly cron is added with the data phase).
+var pipelineEnv = [
+  { name: 'DATABASE_URL', secretRef: 'database-url' }
+  { name: 'BLOB_ACCOUNT_URL', value: blobEndpoint }
+  { name: 'AUTH_MODE', value: 'entra' }
+  { name: 'ENTRA_TENANT_ID', value: entra.tenantId }
+  { name: 'ENTRA_AUDIENCE', value: entra.audience }
+  { name: 'LOG_LEVEL', value: 'INFO' }
+]
+
+// Jobs: database migrations + seed (manual) and the ingestion pipeline, both on demand
+// (console button) and nightly. The pipeline runs from the core-api image.
 var jobs = [
   {
-    name: 'caj-migrate', image: 'chaski/tools', hasImage: true
+    name: 'caj-migrate', image: 'chaski/tools', hasImage: true, schedule: ''
     // Roles first (no init hook in managed PostgreSQL), then schema, then synthetic data.
     command: [ 'sh', '-c', 'python db/bootstrap_roles.py && alembic -c db/alembic.ini upgrade head && python -m chaski_simulator --reset' ]
     kvSecrets: [ 'migrations-database-url', 'pg-app-password', 'pg-readonly-password' ]
@@ -236,14 +248,18 @@ var jobs = [
     ]
   }
   {
-    // The pipeline image arrives with the data phase; until then it keeps the sample image.
-    name: 'caj-pipeline', image: 'chaski/pipeline', hasImage: false
-    command: []
+    // Ingestion flow (quality checks + quarantine), started from the console button.
+    name: 'caj-pipeline', image: 'chaski/core-api', hasImage: true, schedule: ''
+    command: [ 'python', '-m', 'core_api.pipeline_job' ]
     kvSecrets: [ 'database-url' ]
-    env: [
-      { name: 'DATABASE_URL', secretRef: 'database-url' }
-      { name: 'BLOB_ACCOUNT_URL', value: blobEndpoint }
-    ]
+    env: concat(pipelineEnv, [ { name: 'PIPELINE_TRIGGER', value: 'MANUAL' } ])
+  }
+  {
+    // Same flow every night at 22:00 Lima (03:00 UTC), before PostgreSQL is stopped at 23:00.
+    name: 'caj-pipeline-nightly', image: 'chaski/core-api', hasImage: true, schedule: '0 3 * * *'
+    command: [ 'python', '-m', 'core_api.pipeline_job' ]
+    kvSecrets: [ 'database-url' ]
+    env: concat(pipelineEnv, [ { name: 'PIPELINE_TRIGGER', value: 'PROGRAMADO' } ])
   }
 ]
 
@@ -259,10 +275,11 @@ resource jobRes 'Microsoft.App/jobs@2024-03-01' = [for j in jobs: {
     environmentId: cae.id
     workloadProfileName: 'Consumption'
     configuration: {
-      triggerType: 'Manual'
+      triggerType: empty(j.schedule) ? 'Manual' : 'Schedule'
       replicaTimeout: 1800
       replicaRetryLimit: 0
-      manualTriggerConfig: { parallelism: 1, replicaCompletionCount: 1 }
+      manualTriggerConfig: empty(j.schedule) ? { parallelism: 1, replicaCompletionCount: 1 } : null
+      scheduleTriggerConfig: empty(j.schedule) ? null : { cronExpression: j.schedule, parallelism: 1, replicaCompletionCount: 1 }
       registries: [ { server: acrLoginServer, identity: identities.pipeline.id } ]
       secrets: map(j.kvSecrets, s => kvSecret(s, keyVaultUri, identities.pipeline.id))
     }
@@ -291,10 +308,21 @@ resource coreStartsPipeline 'Microsoft.Authorization/roleAssignments@2022-04-01'
   }
 }
 
-// GitHub Actions deploys only the three cuentas-api apps.
-resource ghDeploy 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for i in range(0, 3): {
+// GitHub Actions deploys the CHASKI apps (cuentas dev/test/prod, core, ia and the two
+// webs): Contributor scoped to each app only, never to the resource group.
+resource ghDeploy 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for i in range(0, length(apis)): {
   name: guid(apiApps[i].id, githubPrincipalId, contributor)
   scope: apiApps[i]
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', contributor)
+    principalId: githubPrincipalId
+    principalType: 'ServicePrincipal'
+  }
+}]
+
+resource ghDeployWeb 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for i in range(0, length(webs)): {
+  name: guid(webApps[i].id, githubPrincipalId, contributor)
+  scope: webApps[i]
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', contributor)
     principalId: githubPrincipalId
@@ -332,19 +360,23 @@ resource ghJoin 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
-resource cuentasIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = {
-  name: last(split(identities.cuentas.id, '/'))
-}
+// A deploy re-submits the app's user-assigned identity, which needs Managed Identity
+// Operator on that identity.
+var deployedIdentities = [ 'cuentas', 'core', 'ia', 'web' ]
 
-resource ghIdentityOperator 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(cuentasIdentity.id, githubPrincipalId, managedIdentityOperator)
-  scope: cuentasIdentity
+resource appIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = [for k in deployedIdentities: {
+  name: last(split(identities[k].id, '/'))
+}]
+
+resource ghIdentityOperator 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (k, i) in deployedIdentities: {
+  name: guid(appIdentity[i].id, githubPrincipalId, managedIdentityOperator)
+  scope: appIdentity[i]
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', managedIdentityOperator)
     principalId: githubPrincipalId
     principalType: 'ServicePrincipal'
   }
-}
+}]
 
 output environmentName string = cae.name
 output defaultDomain string = domain
