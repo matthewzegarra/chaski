@@ -39,6 +39,21 @@ describe('userFromToken', () => {
     expect(user?.customerId).toBe('c-2')
   })
 
+  it.each(['extn.customer_id', 'extension_c386a571a8b44de7a54a4e58adc7ff45_customer_id'])(
+    'reads customer_id from the Entra directory extension claim %s',
+    (claim) => {
+      const user = userFromToken(fakeToken({ oid: 'o', roles: ['Cliente'], [claim]: 'c-3', exp: future }))
+      expect(user?.customerId).toBe('c-3')
+    },
+  )
+
+  it('unwraps the array value Entra uses for extension claims', () => {
+    const user = userFromToken(
+      fakeToken({ oid: 'o', roles: ['Cliente'], 'extn.customer_id': ['c-4'], exp: future }),
+    )
+    expect(user?.customerId).toBe('c-4')
+  })
+
   it('rejects expired or malformed tokens', () => {
     expect(userFromToken(fakeToken({ sub: 'u', exp: 1 }))).toBeNull()
     expect(userFromToken('garbage')).toBeNull()

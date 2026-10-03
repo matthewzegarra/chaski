@@ -78,6 +78,24 @@ def test_structured_completion_request_shape() -> None:
     )
 
 
+def test_reasoning_model_sends_effort_instead_of_temperature() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx2.Response(200, json=completion({"content": "{}"}))
+
+    settings = SETTINGS.model_copy(
+        update={"azure_openai_deployment": "gpt-5-mini", "azure_openai_reasoning_effort": "minimal"}
+    )
+    provider = AzureOpenAIProvider(
+        settings, http_client=httpx2.Client(transport=httpx2.MockTransport(handler))
+    )
+    provider.complete_json(system="s", user="u", schema={"type": "object"}, schema_name="x")
+    assert "temperature" not in captured["body"]
+    assert captured["body"]["reasoning_effort"] == "minimal"
+
+
 def test_tool_calls_are_parsed_and_internal_fields_stripped() -> None:
     captured: dict[str, Any] = {}
 

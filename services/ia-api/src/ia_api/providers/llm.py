@@ -40,7 +40,9 @@ class LLMProvider(Protocol):
 
 
 class AzureOpenAIProvider:
-    """Azure OpenAI chat completions, temperature 0, strict JSON schema output.
+    """Azure OpenAI chat completions, deterministic sampling, strict JSON schema output.
+
+    temperature 0, or AZURE_OPENAI_REASONING_EFFORT for reasoning models (gpt-5 family).
 
     Authenticates with AZURE_OPENAI_API_KEY when set, otherwise with Managed Identity
     (DefaultAzureCredential) through an Entra ID token provider.
@@ -71,13 +73,18 @@ class AzureOpenAIProvider:
             kwargs["http_client"] = http_client
         self.client = AzureOpenAI(**kwargs)
         self.deployment = settings.azure_openai_deployment
+        # Reasoning models (gpt-5 family) reject `temperature`; they take an effort level.
+        effort = settings.azure_openai_reasoning_effort
+        self.sampling: dict[str, Any] = (
+            {"reasoning_effort": effort} if effort else {"temperature": 0}
+        )
 
     def complete_json(
         self, *, system: str, user: str, schema: dict[str, Any], schema_name: str
     ) -> LLMResult:
         resp = self.client.chat.completions.create(
             model=self.deployment,
-            temperature=0,
+            **self.sampling,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -102,7 +109,7 @@ class AzureOpenAIProvider:
         ]
         resp = self.client.chat.completions.create(
             model=self.deployment,
-            temperature=0,
+            **self.sampling,
             messages=cast(Any, sent),
             tools=cast(Any, tools),
             tool_choice="auto",

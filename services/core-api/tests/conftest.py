@@ -30,7 +30,9 @@ def ia(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     responses: dict[str, Any] = {}
     calls: list[tuple[str, dict[str, Any]]] = []
 
-    def fake_post(path: str, token: str, **kwargs: Any) -> dict[str, Any] | None:
+    def fake_post(
+        path: str, token: str, timeout: Any = None, **kwargs: Any
+    ) -> dict[str, Any] | None:
         calls.append((path, kwargs))
         value = responses.get(path)
         return value(kwargs) if callable(value) else value

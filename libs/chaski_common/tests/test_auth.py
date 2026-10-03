@@ -7,10 +7,12 @@ import pytest
 from chaski_common.app import create_app
 from chaski_common.auth import (
     CurrentUser,
+    customer_id_claim,
     decode_token,
     issue_dev_token,
     require_customer,
     require_roles,
+    user_from_claims,
 )
 from chaski_common.roles import Role, parse_roles
 from chaski_common.settings import CommonSettings
@@ -53,6 +55,33 @@ def test_token_signed_with_other_secret_is_rejected() -> None:
     token = issue_dev_token(sub="u1", name="Ana", roles=[Role.ADMIN], settings=_settings())
     with pytest.raises(jwt.InvalidSignatureError):
         decode_token(token, _settings(dev_jwt_secret="y" * 40))
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "customer_id",
+        "extension_customer_id",
+        "extn.customer_id",
+        "extension_c386a571a8b44de7a54a4e58adc7ff45_customer_id",
+    ],
+)
+def test_customer_id_from_entra_extension_claims(claim: str) -> None:
+    cid = uuid.uuid4()
+    user = user_from_claims({"oid": "o1", "roles": ["Cliente"], claim: str(cid)}, "t")
+    assert user.customer_id == cid
+    assert user.sub == "o1"
+
+
+def test_customer_id_unwraps_entra_array_value() -> None:
+    cid = uuid.uuid4()
+    user = user_from_claims({"oid": "o", "roles": ["Cliente"], "extn.customer_id": [str(cid)]}, "t")
+    assert user.customer_id == cid
+
+
+def test_customer_id_ignores_other_extensions() -> None:
+    claims = {"sub": "s", "extension_c386a571a8b44de7a54a4e58adc7ff45_segment": "x"}
+    assert customer_id_claim(claims) is None
 
 
 def test_parse_roles_ignores_unknown() -> None:
