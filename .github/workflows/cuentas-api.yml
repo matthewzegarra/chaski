@@ -162,6 +162,8 @@ jobs:
 
   image:
     name: Build, scan and publish image
+    # PROD promotes the image already tested in TEST: nothing to build.
+    if: github.event_name != 'workflow_dispatch' || inputs.environment != 'prod'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     # Credentials only on push (the `build` environment holds the ACR/OIDC variables);

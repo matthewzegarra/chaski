@@ -218,6 +218,18 @@ module apim 'modules/apim.bicep' = if (deployWorkloads) {
   }
 }
 
+module alerts 'modules/alerts.bicep' = if (deployWorkloads) {
+  scope: rg
+  name: 'alerts'
+  params: {
+    tags: tags
+    prefix: prefix
+    alertEmail: deployerUpn
+    appInsightsId: monitoring.outputs.appInsightsId
+    workspaceId: monitoring.outputs.workspaceId
+  }
+}
+
 output resourceGroup string = rg.name
 output keyVaultName string = keyvault.outputs.name
 output acrName string = acr.outputs.name
