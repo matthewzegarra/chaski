@@ -107,19 +107,14 @@ export function OnboardingPage() {
       return
     }
     setLooking(true)
-    setError(null)
     try {
       const res = await api.request<DniLookup>(
         'core',
         `/onboarding/lookup-dni/${data.document_number}`,
         { auth: false },
       )
-      if (!res.available) {
-        toast.error('No pudimos consultar el DNI ahora. Escribe tus datos.')
-        return
-      }
-      if (!res.found || !res.nombres || !res.apellidos) {
-        toast.error('No encontramos ese DNI. Revisa el número o escribe tus datos.')
+      if (!res.available || !res.found || !res.nombres || !res.apellidos) {
+        toast.warning('No salieron nombres para ese DNI. Escríbelos tú y continúa.')
         return
       }
       setData((d) => ({ ...d, first_name: res.nombres!, last_name: res.apellidos! }))
@@ -131,8 +126,8 @@ export function OnboardingPage() {
         return next
       })
       toast.success('Datos encontrados. Confirma que nombres y apellidos sean los tuyos.')
-    } catch (err) {
-      setError(errorMessage(err))
+    } catch {
+      toast.warning('No pudimos consultar el DNI. Escríbelos tú y continúa.')
     } finally {
       setLooking(false)
     }
@@ -216,30 +211,10 @@ export function OnboardingPage() {
       {step === 0 && (
         <form onSubmit={next} className="flex flex-col gap-3" noValidate>
           <h1 className="text-xl font-bold">Abre tu cuenta Chaski</h1>
-          <Field label="Nombres" error={errors.first_name}>
-            {(p) => (
-              <Input
-                {...p}
-                value={data.first_name}
-                onChange={set('first_name')}
-                autoComplete="given-name"
-              />
-            )}
-          </Field>
-          <Field label="Apellidos" error={errors.last_name}>
-            {(p) => (
-              <Input
-                {...p}
-                value={data.last_name}
-                onChange={set('last_name')}
-                autoComplete="family-name"
-              />
-            )}
-          </Field>
           <Field
             label="DNI"
             error={errors.document_number}
-            hint="8 dígitos. Consultar rellena nombres y apellidos para que los confirmes."
+            hint="Consultar es opcional. Si no aparecen nombres y apellidos, escríbelos tú."
           >
             {(p) => (
               <div className="flex gap-2">
@@ -261,6 +236,26 @@ export function OnboardingPage() {
                   Consultar
                 </Button>
               </div>
+            )}
+          </Field>
+          <Field label="Nombres" error={errors.first_name}>
+            {(p) => (
+              <Input
+                {...p}
+                value={data.first_name}
+                onChange={set('first_name')}
+                autoComplete="given-name"
+              />
+            )}
+          </Field>
+          <Field label="Apellidos" error={errors.last_name}>
+            {(p) => (
+              <Input
+                {...p}
+                value={data.last_name}
+                onChange={set('last_name')}
+                autoComplete="family-name"
+              />
             )}
           </Field>
           <Field label="Fecha de nacimiento" error={errors.birth_date}>
