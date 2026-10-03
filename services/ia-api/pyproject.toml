@@ -5,7 +5,7 @@ description = "Clasificador de quejas, scoring, asistente, resumen ejecutivo, NL
 requires-python = ">=3.12"
 dependencies = [
   "chaski-common",
-  "uvicorn[standard]>=0.32",
+  "uvicorn[standard]>=0.54.0",
   "pyodbc>=5.2",  # Azure SQL (ANALYTICS_DIALECT=tsql)
   "python-multipart>=0.0.12",
   "openai>=3.23",
