@@ -23,6 +23,8 @@ param openAi object
 param githubRepo string
 @description('API Management gateway URL; when set, the web apps call the APIs only through it.')
 param apiGatewayUrl string = ''
+@description('Azure SQL data warehouse loaded by the pipeline jobs.')
+param dw object = { server: '', database: '' }
 
 var placeholderImage = 'mcr.microsoft.com/k8se/quickstart:latest'
 var contributor = 'b24988ac-6180-42a0-ab88-20f7382dd24c'
@@ -231,6 +233,8 @@ var pipelineEnv = [
   { name: 'ENTRA_TENANT_ID', value: entra.tenantId }
   { name: 'ENTRA_AUDIENCE', value: entra.audience }
   { name: 'LOG_LEVEL', value: 'INFO' }
+  { name: 'DW_SERVER', value: dw.server }
+  { name: 'DW_DATABASE', value: dw.database }
 ]
 
 // Jobs: database migrations + seed (manual) and the ingestion pipeline, both on demand

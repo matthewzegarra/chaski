@@ -76,7 +76,7 @@ var logAlerts = [
     name: 'alert-${prefix}-pipeline'
     description: 'El pipeline de ingesta envió registros a cuarentena o terminó con error.'
     severity: 2
-    query: 'ContainerAppConsoleLogs | where JobName startswith "caj-pipeline" | where (Log has "pipeline_run_finished" and Log has "CON_ALERTAS") or Log has "Traceback"'
+    query: 'ContainerAppConsoleLogs | where JobName startswith "caj-pipeline" | where (Log has "pipeline_run_finished" and (Log has "CON_ALERTAS" or Log has "FALLIDO")) or Log has "Traceback"'
     threshold: 0
   }
   {
