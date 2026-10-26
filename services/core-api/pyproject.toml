@@ -10,7 +10,7 @@ dependencies = [
   "python-multipart>=0.0.12",
   "email-validator>=2.2",
   "azure-storage-blob>=12.23",
-  "azure-keyvault-secrets>=4.9",
+  "azure-keyvault-secrets>=4.11.3",
   "pyarrow>=18",
 ]
 
