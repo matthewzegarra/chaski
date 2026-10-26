@@ -2,7 +2,7 @@
 # ia-api. Build context: repository root (the uv workspace).
 
 # ---------- build: resolve the locked dependencies into /opt/venv
-FROM python:3.12-slim-bookworm AS builder
+FROM python:3.15-slim-bookworm AS builder
 COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /usr/local/bin/uv
 RUN apt-get update \
     && apt-get install -y --no-install-recommends unixodbc-dev g++ \
@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --package ia-api --no-editable
 
 # ---------- runtime: slim, non-root, ODBC 18 for Azure SQL, versioned prompts
-FROM python:3.12-slim-bookworm AS runtime
+FROM python:3.15-slim-bookworm AS runtime
 LABEL org.opencontainers.image.title="chaski-ia-api" \
       org.opencontainers.image.description="Interbank CHASKI - ia-api"
 # Microsoft ODBC Driver 18: KPIs and NL2SQL read gold from Azure SQL in the cloud.
