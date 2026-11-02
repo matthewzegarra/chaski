@@ -9,7 +9,7 @@ dependencies = [
   "pyodbc>=5.2",  # Azure SQL (ANALYTICS_DIALECT=tsql)
   "python-multipart>=0.0.12",
   "email-validator>=2.2",
-  "azure-storage-blob>=12.23",
+  "azure-storage-blob>=12.31.1",
   "azure-keyvault-secrets>=4.9",
   "pyarrow>=18",
 ]

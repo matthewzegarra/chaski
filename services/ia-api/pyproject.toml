@@ -8,7 +8,7 @@ dependencies = [
   "uvicorn[standard]>=0.54.0",
   "pyodbc>=5.2",  # Azure SQL (ANALYTICS_DIALECT=tsql)
   "python-multipart>=0.0.12",
-  "openai>=3.23",
+  "openai>=3.41.0",
   "sqlglot>=30.21",
   "azure-ai-documentintelligence>=1.0.2",
 ]
